@@ -61,7 +61,7 @@ SEARCH_QUERIES = [
     "compliance operations manager fintech",
 ]
 
-# Series B+ fintechs and banks in payments, credit, lending, crypto
+# Series A+ fintechs and banks in payments, credit, lending, crypto
 TARGET_COMPANIES = [
     # Payments infrastructure
     "Stripe",
@@ -71,9 +71,15 @@ TARGET_COMPANIES = [
     "Braintree",
     "Dwolla",
     "Modern Treasury",
-    "Synapse",
     "Column",
     "Increase",
+    "Melio",
+    "Payoneer",
+    "Nuvei",
+    "Airwallex",
+    "Finix",
+    "Stax",
+    "Orum",
     # Neobanks / consumer fintech
     "Chime",
     "Current",
@@ -81,16 +87,27 @@ TARGET_COMPANIES = [
     "Varo",
     "SoFi",
     "Aspiration",
+    "MoneyLion",
+    "Albert",
+    "Greenlight",
+    "Step",
+    "Copper Banking",
     # Credit / lending
     "Affirm",
     "Klarna",
     "Brex",
     "Ramp",
     "Fundbox",
-    "Greensky",
     "Blend",
     "Plaid",
-    "Credibly",
+    "Upstart",
+    "Figure",
+    "Pagaya",
+    "Upgrade",
+    "LendingClub",
+    "Prosper",
+    "Avant",
+    "Cross River Bank",
     # Crypto / digital assets
     "Coinbase",
     "Kraken",
@@ -98,19 +115,66 @@ TARGET_COMPANIES = [
     "Anchorage Digital",
     "Gemini",
     "BitGo",
-    # Fraud / compliance tooling (Series B+ buyers of compliance tools)
+    "Circle",
+    "Ripple",
+    "Chainalysis",
+    "Fireblocks",
+    "Consensys",
+    "Alchemy",
+    # Fraud / compliance / regtech tooling (Series A+)
     "Sardine",
     "Socure",
     "Alloy",
     "Unit21",
     "Hawk AI",
     "ComplyAdvantage",
+    "Hummingbird",
+    "Persona",
+    "Middesk",
+    "Trulioo",
+    "Featurespace",
+    "Feedzai",
+    "Onfido",
+    "Jumio",
+    "Pliance",
+    # Banking-as-a-Service / embedded finance (Series A+)
+    "Unit",
+    "Treasury Prime",
+    "Synctera",
+    "Bond",
+    "Galileo",
+    "Marqeta",
+    "Lithic",
+    "Highnote",
+    # Insurance / wealthtech fintech (Series A+)
+    "Lemonade",
+    "Wealthsimple",
+    "Betterment",
+    "Robinhood",
+    "Public.com",
+    "Titan",
     # Regional / mid-size banks with compliance hiring
     "Cross River Bank",
     "Grasshopper Bank",
     "Blue Ridge Bank",
     "Piermont Bank",
     "Vast Bank",
+    "Lead Bank",
+    "Coastal Community Bank",
+    "Metropolitan Commercial Bank",
+    "Customers Bank",
+    "WebBank",
+    # Large banks (always hiring compliance)
+    "JPMorgan Chase",
+    "Goldman Sachs",
+    "Morgan Stanley",
+    "Bank of America",
+    "Citibank",
+    "Wells Fargo",
+    "Capital One",
+    "US Bank",
+    "PNC",
+    "Truist",
 ]
 
 # USA only — major fintech hubs + remote
@@ -148,7 +212,7 @@ EXCLUDE_KEYWORDS = [
 ]
 
 # Company stage filter hint for Claude's scoring (enforced in scoring prompt)
-TARGET_COMPANY_STAGE = "Series B or above, or established bank / financial institution"
+TARGET_COMPANY_STAGE = "Series A or above, or established bank / financial institution"
 TARGET_GEOGRAPHY = "United States"
 
 # ── Job Boards to Scrape ──────────────────────────────────────────────────────
