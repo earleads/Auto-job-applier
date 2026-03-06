@@ -38,12 +38,12 @@ Score this job fit from 0 to 100 using these criteria:
 
 HARD DISQUALIFIERS (score 0 immediately if any apply):
 - Company is outside financial services (payments, lending, credit, crypto, banking)
-- Company appears to be pre-Series B (seed/Series A startup with <50 employees)
+- Company appears to be pre-Series A (seed stage startup with no institutional funding)
 - Role is not compliance-related (AML, BSA, KYC, sanctions, fraud, regulatory)
 - Location is outside the United States (non-remote international roles)
 
 SCORING RUBRIC:
-- 90-100: Perfect match — compliance role at Series B+ fintech/bank, strong keyword alignment
+- 90-100: Perfect match — compliance role at Series A+ fintech/bank, strong keyword alignment
 - 70-89: Strong match — compliance role, right sector, minor gaps in seniority or domain
 - 50-69: Partial — compliance adjacent (risk, legal, ops) or sector is adjacent (insurtech, proptech)
 - 0-49: Poor match — wrong function, wrong industry, or disqualified above
