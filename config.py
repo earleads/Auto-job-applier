@@ -15,7 +15,7 @@ CANDIDATE_PROFILE = """
 Name: Joe Allen
 Email: joespehallen90@gmail.com
 LinkedIn: linkedin.com/in/joe-allen-264a53366
-Location: Atlanta, GA (open to remote / hybrid / relocation)
+Location: New York, NY (open to remote / hybrid / relocation)
 
 SUMMARY:
 Detail-oriented compliance professional with 5+ years of progressive experience in AML/BSA program execution, KYC/CDD operations, and regulatory risk management across payments, cross-border remittances, and fintech platforms. Currently at Payoneer managing transaction monitoring and SAR operations for a global payments network processing $70B+ annually. Adept at translating complex regulatory requirements (FinCEN, OFAC, FCA, MAS) into scalable operational controls. Known for bridging compliance and engineering teams to automate manual review workflows, reducing false positives and accelerating case resolution.
