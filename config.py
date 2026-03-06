@@ -4,6 +4,9 @@ Edit this file to customize your job search.
 """
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── API Keys ─────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
