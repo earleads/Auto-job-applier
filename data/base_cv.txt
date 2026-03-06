@@ -1,0 +1,60 @@
+Joe Allen
+joespehallen90@gmail.com | +1 678-555-0142 | LinkedIn: linkedin.com/in/joe-allen-264a53366
+Atlanta, GA (open to remote / hybrid / relocation)
+
+PROFESSIONAL SUMMARY
+Detail-oriented compliance professional with 5+ years of progressive experience in AML/BSA program execution, KYC/CDD operations, and regulatory risk management across payments, cross-border remittances, and fintech platforms. Currently at Payoneer managing transaction monitoring and SAR operations for a global payments network processing $70B+ annually. Adept at translating complex regulatory requirements (FinCEN, OFAC, FCA, MAS) into scalable operational controls. Known for bridging compliance and engineering teams to automate manual review workflows, reducing false positives and accelerating case resolution. Seeking to leverage deep payments compliance expertise in a senior compliance role at a high-growth fintech or financial institution.
+
+EXPERIENCE
+
+Payoneer | Compliance Analyst | May 2024 - Present | Atlanta, GA (Hybrid)
+- Execute day-to-day AML/BSA compliance operations for Payoneer's cross-border payments platform serving 4M+ customers in 190+ countries
+- Investigate and adjudicate 120+ transaction monitoring alerts per week across multiple rule sets (structuring, rapid movement, high-risk jurisdiction, layering)
+- Prepare and file SARs and CTRs within regulatory deadlines, maintaining 100% on-time filing rate across 200+ filings
+- Conduct enhanced due diligence (EDD) on high-risk merchants including MSBs, crypto exchanges, and marketplace sellers operating in sanctioned corridors
+- Collaborate with product and engineering teams to tune Actimize transaction monitoring rules, reducing false positive rate by 35% over 6 months
+- Perform OFAC/SDN sanctions screening and escalate potential matches through established protocols, processing 500+ daily screenings
+- Support regulatory exam preparation by assembling documentation packages and drafting responses for FinCEN and state examiner requests
+- Analyze typologies and emerging financial crime trends (trade-based money laundering, crypto P2P layering, synthetic identity fraud) and present findings to BSA Officer
+- Contribute to quarterly risk assessments covering customer risk, product risk, and geographic risk dimensions
+- Draft and update compliance SOPs for onboarding, ongoing monitoring, and offboarding workflows
+
+Worldpay (FIS) | Associate Compliance Analyst | June 2022 - April 2024 | Atlanta, GA
+- Supported BSA/AML compliance program for one of the world's largest merchant acquiring platforms processing $2T+ in annual volume
+- Managed KYC/CDD refresh program for 3,000+ merchant accounts, identifying 40+ accounts requiring enhanced review or exit
+- Conducted risk-based due diligence on new merchant applications across payments verticals (e-commerce, gaming, crypto on-ramps, CBD)
+- Investigated suspicious activity referrals from automated systems and internal stakeholders, documenting findings in case management system
+- Filed 80+ SARs and contributed to FinCEN 314(b) information sharing requests with peer institutions
+- Assisted in developing risk scoring methodology for merchant onboarding, incorporating NAICS codes, processing volume, chargeback ratios, and geographic risk
+- Monitored OFAC sanctions lists and PEP databases; executed remediation for 15+ confirmed matches during tenure
+- Participated in SOC 2 and regulatory audit readiness reviews, ensuring compliance documentation met examiner expectations
+- Delivered BSA/AML awareness training to 200+ operations staff across 3 regional offices
+
+TransUnion | Compliance Operations Intern | January 2021 - May 2022 | Atlanta, GA
+- Assisted fraud and compliance team with identity verification operations supporting financial institution clients
+- Reviewed and validated consumer dispute cases under FCRA requirements, processing 50+ disputes weekly
+- Built Excel-based dashboards tracking KYC rejection rates, SAR filing volumes, and audit remediation timelines
+- Conducted research on emerging regulatory guidance (CDD Rule, beneficial ownership requirements, FinCEN AML priorities)
+- Contributed to internal policy gap analysis comparing existing procedures against FinCEN, FFIEC, and CFPB examination manual requirements
+
+EDUCATION
+
+Georgia Institute of Technology | B.S. in Business Administration, Finance Concentration | 2021
+- Relevant coursework: Financial Institutions & Markets, Risk Management, Business Law & Ethics, Data Analytics
+- Dean's List (3 semesters)
+- Member, Finance Club; Volunteer, VITA Tax Assistance Program
+
+CERTIFICATIONS
+- CAMS (Certified Anti-Money Laundering Specialist) | ACAMS | 2023
+- CFCS (Certified Financial Crime Specialist) | ACFCS | 2024
+- ACAMS Advanced Sanctions Certificate | 2024
+- SIE (Securities Industry Essentials) | FINRA | 2021
+
+SKILLS
+Regulatory Frameworks: BSA/AML, KYC/CDD/EDD, OFAC Sanctions, USA PATRIOT Act, Bank Secrecy Act, FinCEN Guidance, FFIEC BSA/AML Examination Manual, Reg E, Reg Z, UDAAP, FCRA, GLBA, FCA (UK), MAS (Singapore), 6AMLD (EU)
+Compliance Operations: SAR/CTR Filing, 314(a)/314(b) Information Sharing, Suspicious Activity Investigation, Risk Assessment, Regulatory Exam Preparation, Policy & Procedure Development, Compliance Testing & QA
+Transaction Monitoring: Rule tuning, threshold optimization, typology analysis, alert adjudication, case management, escalation workflows
+Tools & Platforms: NICE Actimize, Verafin, Chainalysis, Dow Jones Risk & Compliance, World-Check, LexisNexis, Alloy, Sardine, ComplyAdvantage, Hummingbird, Jumio, Onfido, Persona
+Technical: SQL, Python (pandas, data analysis), Excel/VBA, Tableau, Power BI, Jira, Confluence, Salesforce
+Industries: Payments, Cross-Border Remittances, Merchant Acquiring, Neobanking, Crypto/Digital Assets, Lending, BaaS, Marketplace Platforms
+Soft Skills: Cross-functional collaboration, stakeholder communication, regulatory exam liaison, training & mentoring, executive reporting, process improvement
