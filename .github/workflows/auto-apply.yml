@@ -27,6 +27,7 @@ jobs:
       - name: Run job applier (dry run)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
         run: python main.py --dry-run
 
       - name: Upload results
