@@ -337,12 +337,17 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
     )
 
     # Load LinkedIn session cookies if available
-    cookies_path = "data/linkedin_cookies.json"
-    if job["ats_type"] == "linkedin" and Path(cookies_path).exists():
+    if job["ats_type"] == "linkedin":
         import json
-        with open(cookies_path) as f:
-            cookies = json.load(f)
-        await context.add_cookies(cookies)
+        li_at = os.environ.get("LINKEDIN_LI_AT")
+        cookies_path = "data/linkedin_cookies.json"
+        if li_at:
+            from save_linkedin_session import build_linkedin_cookies
+            await context.add_cookies(build_linkedin_cookies(li_at))
+        elif Path(cookies_path).exists():
+            with open(cookies_path) as f:
+                cookies = json.load(f)
+            await context.add_cookies(cookies)
 
     page = await context.new_page()
     ats = job.get("ats_type", "other")
