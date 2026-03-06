@@ -41,12 +41,19 @@ HARD DISQUALIFIERS (score 0 immediately if any apply):
 - Company appears to be pre-Series A (seed stage startup with no institutional funding)
 - Role is not compliance-related (AML, BSA, KYC, sanctions, fraud, regulatory)
 - Location is outside the United States (non-remote international roles)
+- Role is too senior for the candidate's experience level (~5 years). Disqualify: Director, VP, Head of, Chief, Senior Manager, Managing Director, Principal. These roles typically require 10+ years and team leadership experience the candidate does not yet have.
+
+SENIORITY GUIDANCE:
+The candidate has ~5 years of compliance experience (intern → associate analyst → analyst).
+Appropriate titles: Analyst, Senior Analyst, Associate, Specialist, Coordinator, junior Officer roles.
+Stretch but acceptable: Compliance Manager (if individual contributor or small team), Compliance Officer (non-senior).
+Too senior: Director, VP, Head of, Senior Manager, Lead, Principal — score 0.
 
 SCORING RUBRIC:
-- 90-100: Perfect match — compliance role at Series A+ fintech/bank, strong keyword alignment
-- 70-89: Strong match — compliance role, right sector, minor gaps in seniority or domain
-- 50-69: Partial — compliance adjacent (risk, legal, ops) or sector is adjacent (insurtech, proptech)
-- 0-49: Poor match — wrong function, wrong industry, or disqualified above
+- 90-100: Perfect match — analyst/specialist compliance role at Series A+ fintech/bank, strong keyword alignment, appropriate seniority
+- 70-89: Strong match — compliance role, right sector, right seniority level, minor gaps in domain
+- 50-69: Partial — compliance adjacent (risk, legal, ops), slightly above target seniority, or sector is adjacent
+- 0-49: Poor match — wrong function, wrong industry, wrong seniority, or disqualified above
 
 Respond ONLY with a JSON object:
 {{"score": 82, "reason": "BSA/AML role at Series C payments company. Strong match on KYC/SAR experience. Gap: candidate lacks direct crypto compliance exposure."}}

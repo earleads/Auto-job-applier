@@ -74,22 +74,27 @@ Soft Skills: Cross-functional collaboration, stakeholder communication, regulato
 # ── Job Search Targets ────────────────────────────────────────────────────────
 
 # Compliance-specific search queries across fintech + banking
+# Targeting analyst / associate / junior officer level (matching ~5 years experience)
 SEARCH_QUERIES = [
-    # Core compliance titles
-    "compliance manager fintech",
-    "BSA AML compliance officer",
+    # Core analyst-level compliance titles
+    "compliance analyst fintech",
     "compliance analyst payments",
-    "KYC compliance manager",
-    "financial crimes compliance",
-    "regulatory compliance fintech",
-    "CAMS compliance officer bank",
-    "fraud compliance analyst",
-    "sanctions compliance officer",
     "AML analyst fintech",
-    # Emerging / automation-adjacent
-    "compliance automation manager",
-    "regtech compliance",
-    "compliance operations manager fintech",
+    "BSA AML analyst",
+    "KYC analyst",
+    "fraud compliance analyst",
+    "sanctions analyst",
+    "financial crimes analyst",
+    "regulatory compliance analyst",
+    # Associate / specialist level
+    "associate compliance analyst",
+    "compliance specialist fintech",
+    "AML compliance specialist",
+    "transaction monitoring analyst",
+    "compliance operations analyst fintech",
+    # Entry-level officer titles (still appropriate for ~5 yrs experience)
+    "compliance officer fintech",
+    "BSA officer",
 ]
 
 # Series A+ fintechs and banks in payments, credit, lending, crypto
@@ -233,8 +238,19 @@ REQUIRED_KEYWORDS = [
 
 # Automatically skip jobs matching these patterns (too senior, wrong industry, etc.)
 EXCLUDE_KEYWORDS = [
-    "chief compliance officer",   # likely too senior — remove if appropriate
-    "VP of compliance",           # adjust based on target seniority
+    # Too senior for analyst-level profile (~5 years experience)
+    "chief compliance officer",
+    "CCO",
+    "VP of compliance",
+    "vice president compliance",
+    "director of compliance",
+    "head of compliance",
+    "senior director",
+    "managing director",
+    "compliance lead",
+    "senior compliance manager",
+    "principal compliance",
+    # Wrong industry
     "healthcare compliance",
     "HIPAA",
     "environmental compliance",

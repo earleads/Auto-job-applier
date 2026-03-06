@@ -24,11 +24,11 @@ jobs:
           playwright install chromium
           playwright install-deps
 
-      - name: Run job applier (dry run)
+      - name: Run job applier
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
-        run: python main.py --dry-run
+        run: python main.py
 
       - name: Upload results
         if: always()
