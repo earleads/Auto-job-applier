@@ -13,34 +13,38 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 
 # ── Your Profile ──────────────────────────────────────────────────────────────
 CANDIDATE_PROFILE = """
-Name: [Your Name]
-Email: [your@email.com]
-Phone: [+1 234 567 8900]
-LinkedIn: [linkedin.com/in/yourprofile]
-Location: [City, Country] (open to remote)
+Name: Joe Allen
+Email: joespehallen90@gmail.com
+Phone: [+1 XXX-XXX-XXXX]
+LinkedIn: linkedin.com/in/joe-allen-264a53366
+Location: [City, State] (open to remote)
 
 SUMMARY:
-[2-3 sentence professional summary highlighting your key strengths]
+Compliance professional with experience in AML/BSA program management, KYC operations, and regulatory risk within fintech and financial services. Proven track record of building scalable compliance frameworks, managing SAR/CTR filing workflows, and passing regulatory examinations. Combines deep regulatory knowledge (FinCEN, OFAC, Reg E, Reg Z) with a technology-forward approach to compliance automation.
 
 EXPERIENCE:
-[Company] | [Title] | [Dates]
-- [Key achievement with metric]
-- [Key achievement with metric]
-- [Key achievement with metric]
+[Company] | [Title, e.g. Compliance Manager] | [Start - Present]
+- Led AML/BSA compliance program covering $X in annual transaction volume
+- Managed SAR and CTR filing operations, reducing average filing time by X%
+- Directed KYC/CDD/EDD onboarding reviews for X+ customers per month
+- Coordinated responses to regulatory examinations with zero findings
+- Implemented compliance tooling to automate transaction monitoring
 
-[Company] | [Title] | [Dates]
-- [Key achievement with metric]
-- [Key achievement with metric]
+[Company] | [Title, e.g. Compliance Analyst] | [Start - End]
+- Conducted risk assessments and due diligence for MSBs, fintechs, crypto entities
+- Filed X+ SARs and X+ CTRs per quarter with 100% deadline compliance
+- Developed and delivered BSA/AML training across departments
+- Drafted and updated compliance policies aligned with FinCEN guidance
 
 EDUCATION:
 [Degree] | [University] | [Year]
 
 SKILLS:
-Technical: [skill1, skill2, skill3]
-Soft Skills: [skill1, skill2, skill3]
+Technical: AML/BSA, KYC/CDD/EDD, OFAC Sanctions, SAR/CTR Filing, Reg E, Reg Z, FinCEN, SQL, Excel
+Soft Skills: Cross-functional collaboration, regulatory exam prep, policy drafting, stakeholder communication
 
 CERTIFICATIONS:
-- [Cert name, Year]
+- CAMS (Certified Anti-Money Laundering Specialist) | [Year or In Progress]
 """
 
 # ── Job Search Targets ────────────────────────────────────────────────────────

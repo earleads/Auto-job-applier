@@ -1,0 +1,38 @@
+Joe Allen
+joespehallen90@gmail.com | +1 XXX-XXX-XXXX | LinkedIn: linkedin.com/in/joe-allen-264a53366
+Location: CITY, STATE (open to remote)
+
+PROFESSIONAL SUMMARY
+Compliance professional with X+ years of experience in AML/BSA program management, KYC operations, and regulatory risk within fintech and financial services. Proven track record of building scalable compliance frameworks, managing SAR/CTR filing workflows, and passing regulatory examinations. Combines deep regulatory knowledge (FinCEN, OFAC, Reg E, Reg Z) with a technology-forward approach to compliance automation.
+
+EXPERIENCE
+
+[COMPANY NAME] | [TITLE, e.g. Compliance Manager / BSA Officer] | [MM/YYYY - Present]
+- Led AML/BSA compliance program covering $X in annual transaction volume across [products/channels]
+- Managed SAR and CTR filing operations, reducing average filing time by X% through process optimization
+- Directed KYC/CDD/EDD onboarding reviews for X+ customers per month with <X% false positive rate
+- Coordinated responses to [regulatory body] examinations with zero findings / minimal findings
+- Implemented [compliance tool/system] to automate transaction monitoring, reducing manual review backlog by X%
+
+[COMPANY NAME] | [TITLE, e.g. Compliance Analyst / AML Analyst] | [MM/YYYY - MM/YYYY]
+- Conducted risk assessments and due diligence for [customer type: MSBs, fintechs, crypto entities]
+- Filed X+ SARs and X+ CTRs per quarter, maintaining 100% regulatory deadline compliance
+- Developed and delivered BSA/AML training for X employees across [departments]
+- Assisted in drafting and updating compliance policies aligned with FinCEN guidance and state regulations
+
+[COMPANY NAME] | [TITLE, e.g. earlier role] | [MM/YYYY - MM/YYYY]
+- [Key achievement with metric]
+- [Key achievement with metric]
+
+EDUCATION
+[Degree, e.g. B.S. in Finance / Criminal Justice / Business] | [University] | [Year]
+
+CERTIFICATIONS
+- CAMS (Certified Anti-Money Laundering Specialist) | [Year] (or "In Progress" if applicable)
+- [Other certs: CFE, CFCS, Series 7/63, etc.]
+
+SKILLS
+Regulatory: AML/BSA, KYC/CDD/EDD, OFAC Sanctions Screening, SAR/CTR Filing, Reg E, Reg Z, Bank Secrecy Act, USA PATRIOT Act, FinCEN Guidance
+Tools: [e.g. Actimize, Verafin, Chainalysis, Dow Jones Risk & Compliance, LexisNexis, Alloy, Unit21]
+Technical: [e.g. SQL, Excel/VBA, Tableau, compliance workflow automation]
+Soft: Cross-functional collaboration, regulatory exam preparation, policy drafting, stakeholder communication
