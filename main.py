@@ -20,7 +20,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import SCRAPE_INTERVAL_HOURS, MAX_APPLICATIONS_PER_DAY, MIN_MATCH_SCORE
+from config import SCRAPE_INTERVAL_HOURS, MAX_APPLICATIONS_PER_DAY, MIN_MATCH_SCORE, ANTHROPIC_API_KEY
 from database import (
     init_db, get_jobs_by_status, update_job_score, update_job_status,
     log_application, count_today_applications, get_stats
@@ -28,6 +28,30 @@ from database import (
 from scrapers.scraper import run_scrapers
 from generators.ai_generator import process_job
 from appliers.auto_applier import run_applications
+
+
+def check_api_key():
+    """Validate the Anthropic API key before running the pipeline."""
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your-key-here":
+        print("❌ FATAL: ANTHROPIC_API_KEY is not set!")
+        print("   Set it in GitHub Secrets or your .env file.")
+        sys.exit(1)
+    import anthropic
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Say OK"}],
+        )
+        print("✅ Anthropic API key validated")
+    except anthropic.AuthenticationError:
+        print("❌ FATAL: ANTHROPIC_API_KEY is invalid (authentication failed)!")
+        print("   Check the key in GitHub Secrets.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"⚠️  API key check got unexpected error: {e}")
+        print("   Continuing anyway — scoring may fail.")
 
 
 DRY_RUN = "--dry-run" in sys.argv
@@ -71,6 +95,7 @@ def save_run_report(report_lines: list[str]):
 
 async def run_pipeline():
     """Full pipeline: scrape → score → generate docs → apply."""
+    check_api_key()
     run_start = datetime.now(timezone.utc)
     report = []
 
@@ -108,14 +133,22 @@ async def run_pipeline():
     new_jobs = get_jobs_by_status("new")
     qualified = []
     scores = []
+    scoring_errors = 0
 
     for job in new_jobs:
         result = process_job(job)
 
         if result is None:
+            # Scoring itself failed (API error, etc.)
             update_job_score(job["id"], 0)
             update_job_status(job["id"], "skipped")
             scores.append(0)
+            scoring_errors += 1
+        elif result.get("skipped"):
+            # Scored successfully but below threshold
+            update_job_score(job["id"], result["score"])
+            update_job_status(job["id"], "skipped")
+            scores.append(result["score"])
         else:
             update_job_score(job["id"], result["score"])
             update_job_status(job["id"], "matched")
@@ -126,13 +159,18 @@ async def run_pipeline():
                 "cover_letter_path": result["cover_letter_path"],
             })
 
+    if scoring_errors > 0:
+        print(f"\n  ❌ SCORING ERRORS: {scoring_errors}/{len(new_jobs)} jobs failed to score!")
+        print("     Check that ANTHROPIC_API_KEY is set correctly in GitHub Secrets.")
+        report.append(f"SCORING ERRORS: {scoring_errors}/{len(new_jobs)} jobs failed")
+
     # Also retry previously failed applications
     failed_jobs = get_jobs_by_status("apply_failed")
     if failed_jobs:
         print(f"\n  🔄 Retrying {len(failed_jobs)} previously failed applications...")
         for job in failed_jobs:
             result = process_job(job)
-            if result is not None:
+            if result is not None and not result.get("skipped"):
                 qualified.append({
                     "job": job,
                     "cv_path": result["cv_path"],

@@ -18,10 +18,10 @@ Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 # ── Job Ranker ─────────────────────────────────────────────────────────────────
 
-def score_job(job: dict) -> int:
+def score_job(job: dict) -> int | None:
     """
     Use Claude to score job fit 0–100 against candidate profile.
-    Returns integer score.
+    Returns integer score, or None if the API call fails.
     """
     description = job.get('description', '').strip()
     desc_section = description[:3000] if description else "(No description provided — score based on title, company, and location only)"
@@ -80,8 +80,8 @@ Respond ONLY with a JSON object:
         print(f"  📊 Score {score}/100 — {data.get('reason', '')[:80]}")
         return score
     except Exception as e:
-        print(f"  ⚠️  Scoring failed: {e}")
-        return 0
+        print(f"  ❌ SCORING FAILED: {e}")
+        return None
 
 
 # ── CV Tailor ──────────────────────────────────────────────────────────────────
@@ -210,9 +210,13 @@ def process_job(job: dict) -> dict | None:
 
     score = score_job(job)
 
+    if score is None:
+        print(f"  ❌ API call failed — cannot score this job")
+        return None
+
     if score < MIN_MATCH_SCORE:
         print(f"  ⏭️  Score {score} below threshold {MIN_MATCH_SCORE} — skipping")
-        return None
+        return {"score": score, "skipped": True}
 
     print(f"  ✅ Qualified! Generating tailored docs...")
     cv_text = tailor_cv(job)
