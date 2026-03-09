@@ -5,7 +5,7 @@ AI Generator — Job ranking, CV tailoring, and cover letter generation via Clau
 import json
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 import anthropic
 from fpdf import FPDF
@@ -178,7 +178,7 @@ def save_documents(job: dict, cv_text: str, cover_letter: str) -> tuple[str, str
     """Save CV and cover letter as PDF (for ATS upload) and .txt (for reference). Returns (cv_pdf_path, cl_pdf_path)."""
     safe_company = re.sub(r"[^\w]", "_", job["company"])
     safe_title = re.sub(r"[^\w]", "_", job["title"])[:30]
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     prefix = f"{OUTPUT_DIR}/{timestamp}_{safe_company}_{safe_title}"
 
     cv_pdf_path = f"{prefix}_CV.pdf"

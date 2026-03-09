@@ -15,7 +15,7 @@ Usage:
 import asyncio
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -58,7 +58,7 @@ def print_stats():
 def save_run_report(report_lines: list[str]):
     """Save run report to disk so it's captured in GitHub Actions artifacts."""
     Path("data").mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     header = f"=== Run Report — {timestamp} ===\n"
 
     # Append to report file (keeps history across runs if DB persists)
@@ -71,7 +71,7 @@ def save_run_report(report_lines: list[str]):
 
 async def run_pipeline():
     """Full pipeline: scrape → score → generate docs → apply."""
-    run_start = datetime.utcnow()
+    run_start = datetime.now(timezone.utc)
     report = []
 
     print(f"\n{'='*54}")
@@ -198,7 +198,7 @@ async def run_pipeline():
             report.append(f"Applications: {applied_count} succeeded, {failed_count} failed")
 
     # ── Summary ────────────────────────────────────────────
-    elapsed = (datetime.utcnow() - run_start).seconds
+    elapsed = (datetime.now(timezone.utc) - run_start).seconds
     print(f"\n[4/4] PIPELINE COMPLETE in {elapsed}s")
     report.append(f"Duration: {elapsed}s")
     print_stats()
