@@ -165,21 +165,40 @@ Output ONLY the cover letter text.
 
 def _sanitize_for_pdf(text: str) -> str:
     """Replace Unicode characters that Helvetica can't render with ASCII equivalents."""
+    import unicodedata
+
+    # Normalize unicode (e.g. decompose combined characters)
+    text = unicodedata.normalize("NFKD", text)
     replacements = {
         "\u2014": "--",   # em dash
         "\u2013": "-",    # en dash
+        "\u2012": "-",    # figure dash
+        "\u2015": "--",   # horizontal bar
+        "\u2010": "-",    # hyphen
+        "\u2011": "-",    # non-breaking hyphen
         "\u2018": "'",    # left single quote
         "\u2019": "'",    # right single quote
+        "\u201a": ",",    # single low-9 quote
         "\u201c": '"',    # left double quote
         "\u201d": '"',    # right double quote
+        "\u201e": '"',    # double low-9 quote
         "\u2022": "*",    # bullet
+        "\u2023": ">",    # triangular bullet
+        "\u2043": "-",    # hyphen bullet
         "\u2026": "...",  # ellipsis
         "\u00a0": " ",    # non-breaking space
+        "\u2002": " ",    # en space
+        "\u2003": " ",    # em space
+        "\u2009": " ",    # thin space
+        "\u200b": "",     # zero-width space
+        "\u00b7": "*",    # middle dot
+        "\u2192": "->",   # right arrow
+        "\u2190": "<-",   # left arrow
     }
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
-    # Strip any remaining non-ASCII characters that Helvetica can't render
-    return text.encode("ascii", errors="replace").decode("ascii")
+    # Strip ANY character outside printable ASCII (0x20-0x7E) plus newline/tab
+    return "".join(c if (c in "\n\t" or 0x20 <= ord(c) <= 0x7E) else "?" for c in text)
 
 
 def text_to_pdf(text: str, pdf_path: str):
