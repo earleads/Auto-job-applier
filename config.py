@@ -233,8 +233,16 @@ MIN_MATCH_SCORE = 70
 
 # Only apply to jobs that contain at least one of these keywords in title/description
 REQUIRED_KEYWORDS = [
+    # Core compliance terms
     "compliance", "AML", "BSA", "KYC", "financial crimes",
     "sanctions", "fraud", "regulatory", "regtech",
+    # Alternative titles used at fintechs
+    "risk operations", "risk management", "risk analyst",
+    "trust and safety", "trust & safety", "trust operations",
+    "due diligence", "CDD", "EDD",
+    "OFAC", "FinCEN", "fincrime",
+    "anti-money laundering", "anti money laundering",
+    "transaction monitoring", "SAR", "suspicious activity",
 ]
 
 # Automatically skip jobs matching these patterns (too senior, wrong industry, etc.)
