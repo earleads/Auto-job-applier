@@ -69,14 +69,16 @@ def title_matches_compliance(title: str) -> bool:
 
 def passes_keyword_filter(job: dict) -> bool:
     """
-    Quick pre-filter before spending Claude tokens:
-    - Must contain at least one REQUIRED keyword in title or description
-    - Must not match EXCLUDE keywords
+    Quick pre-filter before spending Claude tokens.
+    The job TITLE must contain a compliance keyword — we don't match on
+    description alone because every fintech's boilerplate mentions
+    "compliance" / "risk" / "regulatory" regardless of the actual role.
     """
-    text = f"{job.get('title', '')} {strip_html(job.get('description', ''))}".lower()
-    has_required = any(kw.lower() in text for kw in REQUIRED_KEYWORDS)
-    if not has_required:
+    title = job.get("title", "")
+    if not title_matches_compliance(title):
         return False
+    # Also reject titles that match exclude patterns (too senior, wrong industry)
+    text = f"{title} {strip_html(job.get('description', ''))}".lower()
     is_excluded = any(kw.lower() in text for kw in EXCLUDE_KEYWORDS)
     return not is_excluded
 
