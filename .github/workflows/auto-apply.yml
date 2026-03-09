@@ -24,6 +24,15 @@ jobs:
           playwright install chromium
           playwright install-deps
 
+      - name: Restore previous run data
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: application-results
+          path: data/
+          search_artifacts: true
+          if_no_artifact_found: warn
+        continue-on-error: true
+
       - name: Run job applier
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -37,3 +46,4 @@ jobs:
           name: application-results
           path: data/
           retention-days: 30
+          overwrite: true

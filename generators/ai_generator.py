@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 
 import anthropic
+from fpdf import FPDF
 
 from config import ANTHROPIC_API_KEY, CANDIDATE_PROFILE, MIN_MATCH_SCORE, OUTPUT_DIR
 
@@ -156,24 +157,40 @@ Output ONLY the cover letter text.
 
 # ── Save Documents ─────────────────────────────────────────────────────────────
 
+def text_to_pdf(text: str, pdf_path: str):
+    """Convert plain text to a clean PDF for ATS upload."""
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    for line in text.split("\n"):
+        pdf.cell(0, 5, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(pdf_path)
+
+
 def save_documents(job: dict, cv_text: str, cover_letter: str) -> tuple[str, str]:
-    """Save CV and cover letter to disk. Returns (cv_path, cl_path)."""
+    """Save CV and cover letter as PDF (for ATS upload) and .txt (for reference). Returns (cv_pdf_path, cl_pdf_path)."""
     safe_company = re.sub(r"[^\w]", "_", job["company"])
     safe_title = re.sub(r"[^\w]", "_", job["title"])[:30]
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M")
     prefix = f"{OUTPUT_DIR}/{timestamp}_{safe_company}_{safe_title}"
 
-    cv_path = f"{prefix}_CV.txt"
-    cl_path = f"{prefix}_CoverLetter.txt"
+    cv_pdf_path = f"{prefix}_CV.pdf"
+    cl_pdf_path = f"{prefix}_CoverLetter.pdf"
 
-    with open(cv_path, "w") as f:
+    # Save PDFs for ATS upload
+    text_to_pdf(cv_text, cv_pdf_path)
+    text_to_pdf(cover_letter, cl_pdf_path)
+
+    # Also save .txt for human review
+    with open(f"{prefix}_CV.txt", "w") as f:
         f.write(cv_text)
-    with open(cl_path, "w") as f:
+    with open(f"{prefix}_CoverLetter.txt", "w") as f:
         f.write(cover_letter)
 
-    print(f"  💾 Saved: {cv_path}")
-    print(f"  💾 Saved: {cl_path}")
-    return cv_path, cl_path
+    print(f"  💾 Saved: {cv_pdf_path}")
+    print(f"  💾 Saved: {cl_pdf_path}")
+    return cv_pdf_path, cl_pdf_path
 
 
 # ── Main pipeline step ─────────────────────────────────────────────────────────

@@ -309,9 +309,10 @@ COMPANY_ATS_MAP = {
 
 # ── Main scraper orchestrator ──────────────────────────────────────────────────
 
-async def run_scrapers() -> int:
-    """Run all enabled scrapers. Returns count of new jobs found."""
+async def run_scrapers() -> tuple[int, dict[str, int]]:
+    """Run all enabled scrapers. Returns (total_new, {source: count})."""
     new_jobs = 0
+    source_counts = {"greenhouse": 0, "lever": 0, "linkedin": 0, "indeed": 0}
 
     # 1. Direct ATS scrapes (no browser needed — most reliable)
     print("\n📡 Scraping company ATS pages...")
@@ -332,46 +333,57 @@ async def run_scrapers() -> int:
                     continue
                 if upsert_job(job):
                     new_jobs += 1
+                    source_counts[ats] += 1
                     print(f"  ✅ NEW: {job['title']} @ {job['company']}")
 
     # 2. LinkedIn + Indeed (browser-based)
     if ENABLED_SOURCES.get("linkedin") or ENABLED_SOURCES.get("indeed"):
         print("\n🌐 Launching browser for job boards...")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-            )
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 800},
-            )
-            page = await context.new_page()
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                )
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = await context.new_page()
 
-            for query in SEARCH_QUERIES:
-                for location in LOCATIONS:
-                    if ENABLED_SOURCES.get("linkedin"):
-                        jobs = await scrape_linkedin(page, query, location)
-                        # Fetch descriptions for top jobs (rate-limit friendly)
-                        for job in jobs[:5]:
-                            job["description"] = await fetch_linkedin_description(page, job)
-                            if upsert_job(job):
-                                new_jobs += 1
-                                print(f"  ✅ NEW: {job['title']} @ {job['company']}")
+                for query in SEARCH_QUERIES:
+                    for location in LOCATIONS:
+                        if ENABLED_SOURCES.get("linkedin"):
+                            try:
+                                jobs = await scrape_linkedin(page, query, location)
+                                for job in jobs[:5]:
+                                    job["description"] = await fetch_linkedin_description(page, job)
+                                    if upsert_job(job):
+                                        new_jobs += 1
+                                        source_counts["linkedin"] += 1
+                                        print(f"  ✅ NEW: {job['title']} @ {job['company']}")
+                            except Exception as e:
+                                print(f"  ❌ LinkedIn scrape failed for '{query}' in {location}: {e}")
 
-                    if ENABLED_SOURCES.get("indeed"):
-                        jobs = await scrape_indeed(page, query, location)
-                        for job in jobs:
-                            if upsert_job(job):
-                                new_jobs += 1
+                        if ENABLED_SOURCES.get("indeed"):
+                            try:
+                                jobs = await scrape_indeed(page, query, location)
+                                for job in jobs:
+                                    if upsert_job(job):
+                                        new_jobs += 1
+                                        source_counts["indeed"] += 1
+                            except Exception as e:
+                                print(f"  ❌ Indeed scrape failed for '{query}' in {location}: {e}")
 
-                    await asyncio.sleep(2)  # Be polite
+                        await asyncio.sleep(2)  # Be polite
 
-            await browser.close()
+                await browser.close()
+        except Exception as e:
+            print(f"  ❌ Browser launch failed: {e}")
 
     print(f"\n🎯 Scraping complete — {new_jobs} new jobs found")
-    return new_jobs
+    return new_jobs, source_counts

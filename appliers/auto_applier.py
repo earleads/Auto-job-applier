@@ -368,14 +368,14 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
     return success
 
 
-async def run_applications(jobs_with_docs: list[dict]) -> int:
+async def run_applications(jobs_with_docs: list[dict]) -> list[bool]:
     """
-    Apply to all qualified jobs. Returns count of successful applications.
+    Apply to all qualified jobs. Returns list of success/failure per job.
     """
     if not jobs_with_docs:
-        return 0
+        return []
 
-    successful = 0
+    results = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -388,10 +388,9 @@ async def run_applications(jobs_with_docs: list[dict]) -> int:
                 item["cover_letter_path"],
                 browser
             )
-            if success:
-                successful += 1
+            results.append(success)
             await asyncio.sleep(5)  # Rate limiting between applications
 
         await browser.close()
 
-    return successful
+    return results
