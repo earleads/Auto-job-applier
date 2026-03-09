@@ -72,6 +72,16 @@ def init_db():
     print("✅ Database initialized")
 
 
+def is_first_scrape() -> bool:
+    """Return True if no jobs have been scraped yet (first run)."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()
+        return row[0] == 0
+    finally:
+        conn.close()
+
+
 def upsert_job(job: dict) -> bool:
     """Insert a job. Returns True if it's new, False if already seen."""
     conn = get_conn()
