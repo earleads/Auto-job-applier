@@ -9,6 +9,7 @@ Usage:
     python main.py --loop       # Run on schedule (every N hours)
     python main.py --stats      # Show stats and exit
     python main.py --dry-run    # Scrape + score but don't apply
+    python main.py --test       # Quick run: 3 ATS companies, no browser, max 2 apps
 """
 
 import asyncio
@@ -30,6 +31,7 @@ from appliers.auto_applier import run_applications
 
 
 DRY_RUN = "--dry-run" in sys.argv
+TEST_MODE = "--test" in sys.argv
 REPORT_PATH = "data/run_report.txt"
 
 
@@ -74,16 +76,19 @@ async def run_pipeline():
 
     print(f"\n{'='*54}")
     print(f"🚀 Pipeline started at {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
+    if TEST_MODE:
+        print("🧪 TEST MODE — limited scrape (3 ATS companies, 2 LinkedIn queries)")
+        report.append("Mode: TEST")
     if DRY_RUN:
         print("🔍 DRY RUN MODE — applications will not be submitted")
         report.append("Mode: DRY RUN")
-    else:
+    elif not TEST_MODE:
         report.append("Mode: LIVE")
     print(f"{'='*54}")
 
     # ── Step 1: Scrape ─────────────────────────────────────
     print("\n[1/4] SCRAPING JOB BOARDS...")
-    new_count, source_counts = await run_scrapers()
+    new_count, source_counts = await run_scrapers(test_mode=TEST_MODE)
 
     # Diagnostics: per-source breakdown
     print(f"\n  📡 Scrape results by source:")
@@ -156,7 +161,8 @@ async def run_pipeline():
     else:
         # Respect daily application limit
         today_count = count_today_applications()
-        remaining = MAX_APPLICATIONS_PER_DAY - today_count
+        max_apps = 2 if TEST_MODE else MAX_APPLICATIONS_PER_DAY
+        remaining = max_apps - today_count
         to_apply = qualified[:remaining]
 
         if DRY_RUN:
