@@ -178,8 +178,8 @@ def _sanitize_for_pdf(text: str) -> str:
     }
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
-    # Strip any remaining non-latin1 characters
-    return text.encode("latin-1", errors="replace").decode("latin-1")
+    # Strip any remaining non-ASCII characters that Helvetica can't render
+    return text.encode("ascii", errors="replace").decode("ascii")
 
 
 def text_to_pdf(text: str, pdf_path: str):
