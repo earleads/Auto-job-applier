@@ -163,8 +163,28 @@ Output ONLY the cover letter text.
 
 # ── Save Documents ─────────────────────────────────────────────────────────────
 
+def _sanitize_for_pdf(text: str) -> str:
+    """Replace Unicode characters that Helvetica can't render with ASCII equivalents."""
+    replacements = {
+        "\u2014": "--",   # em dash
+        "\u2013": "-",    # en dash
+        "\u2018": "'",    # left single quote
+        "\u2019": "'",    # right single quote
+        "\u201c": '"',    # left double quote
+        "\u201d": '"',    # right double quote
+        "\u2022": "*",    # bullet
+        "\u2026": "...",  # ellipsis
+        "\u00a0": " ",    # non-breaking space
+    }
+    for char, replacement in replacements.items():
+        text = text.replace(char, replacement)
+    # Strip any remaining non-latin1 characters
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def text_to_pdf(text: str, pdf_path: str):
     """Convert plain text to a clean PDF for ATS upload."""
+    text = _sanitize_for_pdf(text)
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
