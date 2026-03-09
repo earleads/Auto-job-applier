@@ -17,7 +17,7 @@ from config import (
     SEARCH_QUERIES, TARGET_COMPANIES, LOCATIONS, ENABLED_SOURCES,
     REQUIRED_KEYWORDS, EXCLUDE_KEYWORDS,
 )
-from database import upsert_job
+from database import upsert_job, is_first_scrape
 
 US_STATE_HINTS = [
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -85,11 +85,13 @@ def detect_ats(url: str) -> Optional[str]:
 
 # ── LinkedIn Scraper ───────────────────────────────────────────────────────────
 
-async def scrape_linkedin(page: Page, query: str, location: str) -> list[dict]:
+async def scrape_linkedin(page: Page, query: str, location: str, first_run: bool = False) -> list[dict]:
     jobs = []
+    # First run: search last 7 days; subsequent runs: last 24 hours
+    time_filter = "r604800" if first_run else "r86400"
     url = (
         f"https://www.linkedin.com/jobs/search/?keywords={query.replace(' ', '%20')}"
-        f"&location={location.replace(' ', '%20')}&f_TPR=r86400&sortBy=DD"
+        f"&location={location.replace(' ', '%20')}&f_TPR={time_filter}&sortBy=DD"
     )
     print(f"  🔍 LinkedIn: '{query}' in {location}")
     await page.goto(url, timeout=30000)
@@ -186,9 +188,11 @@ async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
 
 # ── Indeed Scraper ─────────────────────────────────────────────────────────────
 
-async def scrape_indeed(page: Page, query: str, location: str) -> list[dict]:
+async def scrape_indeed(page: Page, query: str, location: str, first_run: bool = False) -> list[dict]:
     jobs = []
-    url = f"https://www.indeed.com/jobs?q={query.replace(' ', '+')}&l={location.replace(' ', '+')}&fromage=1&sort=date"
+    # First run: search last 7 days; subsequent runs: last 24 hours
+    days = 7 if first_run else 1
+    url = f"https://www.indeed.com/jobs?q={query.replace(' ', '+')}&l={location.replace(' ', '+')}&fromage={days}&sort=date"
     print(f"  🔍 Indeed: '{query}' in {location}")
 
     try:
@@ -369,6 +373,10 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
     new_jobs = 0
     source_counts = {"greenhouse": 0, "lever": 0, "linkedin": 0, "indeed": 0}
 
+    first_run = is_first_scrape()
+    if first_run:
+        print("\n📅 First run detected — searching last 7 days of job posts")
+
     companies = TARGET_COMPANIES
     if test_mode:
         # Pick first 3 companies that have ATS mappings for a quick check
@@ -428,7 +436,7 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
                         for location in LOCATIONS:
                             if ENABLED_SOURCES.get("linkedin"):
                                 try:
-                                    jobs = await scrape_linkedin(page, query, location)
+                                    jobs = await scrape_linkedin(page, query, location, first_run=first_run)
                                     for job in jobs:
                                         job = await fetch_linkedin_job_details(page, job)
                                         if upsert_job(job):
@@ -441,7 +449,7 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
 
                             if ENABLED_SOURCES.get("indeed"):
                                 try:
-                                    jobs = await scrape_indeed(page, query, location)
+                                    jobs = await scrape_indeed(page, query, location, first_run=first_run)
                                     for job in jobs:
                                         if upsert_job(job):
                                             new_jobs += 1
