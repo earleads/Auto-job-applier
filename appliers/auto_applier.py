@@ -336,29 +336,22 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
         )
     )
 
-    # Load LinkedIn session cookies if available
-    if job["ats_type"] == "linkedin":
-        import json
-        li_at = os.environ.get("LINKEDIN_LI_AT")
-        cookies_path = "data/linkedin_cookies.json"
-        if li_at:
-            from save_linkedin_session import build_linkedin_cookies
-            await context.add_cookies(build_linkedin_cookies(li_at))
-        elif Path(cookies_path).exists():
-            with open(cookies_path) as f:
-                cookies = json.load(f)
-            await context.add_cookies(cookies)
-
     page = await context.new_page()
     ats = job.get("ats_type", "other")
 
+    # For LinkedIn-sourced jobs with external apply URLs, use the external URL
+    apply_url = job.get("apply_url", job["url"])
+    job_for_apply = {**job, "url": apply_url}
+
     try:
         if ats == "greenhouse":
-            success = await apply_greenhouse(page, job, cv_path, cover_letter_path)
+            success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "lever":
-            success = await apply_lever(page, job, cv_path, cover_letter_path)
+            success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "linkedin":
-            success = await apply_linkedin(page, job, cv_path, cover_letter_path)
+            # No LinkedIn Easy Apply — skip jobs without external apply links
+            print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
+            success = False
         else:
             print(f"  ⏭️  Unknown ATS type '{ats}' — skipping auto-apply")
             success = False

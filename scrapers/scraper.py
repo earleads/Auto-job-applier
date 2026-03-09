@@ -31,6 +31,16 @@ NON_US_HINTS = [
     "Singapore","Australia","Germany","France","Netherlands","Dublin","Poland",
 ]
 
+def strip_html(text: str) -> str:
+    """Strip HTML tags to get plain text for keyword matching and scoring."""
+    if not text:
+        return ""
+    clean = re.sub(r"<[^>]+>", " ", text)
+    clean = re.sub(r"&[a-zA-Z]+;", " ", clean)  # &amp; &nbsp; etc.
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
 def is_usa_location(location: str) -> bool:
     """True if location appears to be US-based or remote."""
     if not location:
@@ -47,7 +57,7 @@ def passes_keyword_filter(job: dict) -> bool:
     - Must contain at least one REQUIRED keyword in title or description
     - Must not match EXCLUDE keywords
     """
-    text = f"{job.get('title', '')} {job.get('description', '')}".lower()
+    text = f"{job.get('title', '')} {strip_html(job.get('description', ''))}".lower()
     has_required = any(kw.lower() in text for kw in REQUIRED_KEYWORDS)
     if not has_required:
         return False
@@ -127,22 +137,51 @@ async def scrape_linkedin(page: Page, query: str, location: str) -> list[dict]:
     return jobs
 
 
-async def fetch_linkedin_description(page: Page, job: dict) -> str:
-    """Fetch full JD from LinkedIn job page."""
+async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
+    """
+    Fetch full JD from LinkedIn job page AND extract external apply URL.
+    Updates the job dict in place with description, and if an external apply
+    link is found, updates url and ats_type to route to the real ATS.
+    """
     try:
         await page.goto(job["url"], timeout=20000)
         await page.wait_for_timeout(2000)
+
         # Try to expand "Show more"
         see_more = await page.query_selector("button.show-more-less-html__button")
         if see_more:
             await see_more.click()
             await page.wait_for_timeout(500)
+
         desc_el = await page.query_selector(".description__text")
         if desc_el:
-            return (await desc_el.inner_text()).strip()
+            job["description"] = (await desc_el.inner_text()).strip()
+
+        # Look for external apply link (not Easy Apply)
+        # LinkedIn shows "Apply" button that links to the company's ATS
+        apply_link = await page.query_selector(
+            "a.apply-button[href*='greenhouse'], "
+            "a.apply-button[href*='lever.co'], "
+            "a[href*='boards.greenhouse.io'], "
+            "a[href*='jobs.lever.co'], "
+            "a.apply-button--offsite, "
+            ".apply-button--offsite a, "
+            "a[data-tracking-control-name='public_jobs_apply-link-offsite']"
+        )
+        if apply_link:
+            external_url = await apply_link.get_attribute("href")
+            if external_url:
+                external_url = external_url.split("?")[0] if "linkedin.com" not in external_url else external_url
+                ats_type = detect_ats(external_url)
+                if ats_type in ("greenhouse", "lever"):
+                    print(f"    🔗 External apply link found: {ats_type}")
+                    job["apply_url"] = external_url
+                    job["ats_type"] = ats_type
+
     except Exception as e:
-        print(f"    ⚠️  Description fetch failed: {e}")
-    return ""
+        print(f"    ⚠️  Job detail fetch failed: {e}")
+
+    return job
 
 
 # ── Indeed Scraper ─────────────────────────────────────────────────────────────
@@ -205,17 +244,23 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
                 data = r.json()
                 for j in data.get("jobs", []):
                     job_url = j.get("absolute_url", "")
+                    raw_content = j.get("content", "")
                     jobs.append({
                         "id": make_id(job_url),
                         "title": j.get("title", ""),
                         "company": company_slug.replace("-", " ").title(),
                         "location": ", ".join([l["name"] for l in j.get("offices", [])]),
                         "url": job_url,
-                        "description": j.get("content", ""),
+                        "description": raw_content,
+                        "description_text": strip_html(raw_content),
                         "source": "greenhouse",
                         "posted_at": j.get("updated_at", datetime.utcnow().isoformat()),
                         "ats_type": "greenhouse",
                     })
+            elif r.status_code == 404:
+                pass  # Board doesn't exist or slug is wrong — silent
+            else:
+                print(f"  ⚠️  Greenhouse {company_slug}: HTTP {r.status_code}")
     except Exception as e:
         print(f"  ⚠️  Greenhouse {company_slug} error: {e}")
     return jobs
@@ -238,19 +283,25 @@ async def scrape_lever(company_slug: str) -> list[dict]:
                         *[l.get("content", "") for l in j.get("lists", [])],
                         j.get("additional", ""),
                     ]
+                    raw_desc = "\n".join(filter(None, desc_parts))
                     jobs.append({
                         "id": make_id(job_url),
                         "title": j.get("text", ""),
                         "company": company_slug.replace("-", " ").title(),
                         "location": j.get("categories", {}).get("location", ""),
                         "url": job_url,
-                        "description": "\n".join(filter(None, desc_parts)),
+                        "description": raw_desc,
+                        "description_text": strip_html(raw_desc),
                         "source": "lever",
                         "posted_at": datetime.fromtimestamp(
                             j.get("createdAt", 0) / 1000
                         ).isoformat(),
                         "ats_type": "lever",
                     })
+            elif r.status_code == 404:
+                pass  # Board doesn't exist
+            else:
+                print(f"  ⚠️  Lever {company_slug}: HTTP {r.status_code}")
     except Exception as e:
         print(f"  ⚠️  Lever {company_slug} error: {e}")
     return jobs
@@ -331,6 +382,9 @@ async def run_scrapers() -> tuple[int, dict[str, int]]:
                     continue
                 if not passes_keyword_filter(job):
                     continue
+                # Store clean text description for scoring
+                if "description_text" in job:
+                    job["description"] = job.pop("description_text")
                 if upsert_job(job):
                     new_jobs += 1
                     source_counts[ats] += 1
@@ -360,12 +414,14 @@ async def run_scrapers() -> tuple[int, dict[str, int]]:
                         if ENABLED_SOURCES.get("linkedin"):
                             try:
                                 jobs = await scrape_linkedin(page, query, location)
-                                for job in jobs[:5]:
-                                    job["description"] = await fetch_linkedin_description(page, job)
+                                # Fetch description + external apply URL for all jobs
+                                for job in jobs:
+                                    job = await fetch_linkedin_job_details(page, job)
                                     if upsert_job(job):
                                         new_jobs += 1
                                         source_counts["linkedin"] += 1
                                         print(f"  ✅ NEW: {job['title']} @ {job['company']}")
+                                    await asyncio.sleep(1)  # Rate limit between detail fetches
                             except Exception as e:
                                 print(f"  ❌ LinkedIn scrape failed for '{query}' in {location}: {e}")
 
