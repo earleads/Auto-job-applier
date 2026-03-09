@@ -4,7 +4,7 @@ Database layer — SQLite for tracking jobs, applications, and status.
 
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from config import DB_PATH
 
@@ -14,6 +14,14 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _migrate_add_column(conn, table: str, column: str, col_type: str):
+    """Add a column to a table if it doesn't already exist."""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cursor.fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
 def init_db():
@@ -54,6 +62,11 @@ def init_db():
             failed          INTEGER DEFAULT 0
         );
     """)
+
+    # Migrations: add columns that may not exist in older databases
+    _migrate_add_column(conn, "jobs", "apply_url", "TEXT")
+    _migrate_add_column(conn, "jobs", "ats_type", "TEXT")
+
     conn.commit()
     conn.close()
     print("✅ Database initialized")
@@ -68,7 +81,7 @@ def upsert_job(job: dict) -> bool:
                               source, posted_at, scraped_at, ats_type)
             VALUES (:id, :title, :company, :location, :url, :apply_url, :description,
                     :source, :posted_at, :scraped_at, :ats_type)
-        """, {**job, "apply_url": job.get("apply_url", ""), "scraped_at": datetime.utcnow().isoformat()})
+        """, {**job, "apply_url": job.get("apply_url", ""), "scraped_at": datetime.now(timezone.utc).isoformat()})
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -97,7 +110,7 @@ def log_application(job_id: str, cv_path: str, cover_letter_path: str, notes: st
     conn.execute("""
         INSERT INTO applications (job_id, applied_at, cv_path, cover_letter_path, notes)
         VALUES (?, ?, ?, ?, ?)
-    """, (job_id, datetime.utcnow().isoformat(), cv_path, cover_letter_path, notes))
+    """, (job_id, datetime.now(timezone.utc).isoformat(), cv_path, cover_letter_path, notes))
     conn.commit()
     conn.close()
 
@@ -110,7 +123,7 @@ def get_jobs_by_status(status: str) -> list:
 
 
 def count_today_applications() -> int:
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     conn = get_conn()
     count = conn.execute(
         "SELECT COUNT(*) FROM applications WHERE applied_at LIKE ?", (f"{today}%",)

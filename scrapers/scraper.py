@@ -7,7 +7,7 @@ Uses Playwright for JS-heavy pages and httpx for lightweight ATS APIs.
 import asyncio
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -127,7 +127,7 @@ async def scrape_linkedin(page: Page, query: str, location: str) -> list[dict]:
                 "url": job_url,
                 "description": "",   # fetched separately
                 "source": "linkedin",
-                "posted_at": datetime.utcnow().isoformat(),
+                "posted_at": datetime.now(timezone.utc).isoformat(),
                 "ats_type": "linkedin",
             }
             jobs.append(job)
@@ -220,7 +220,7 @@ async def scrape_indeed(page: Page, query: str, location: str) -> list[dict]:
                     "url": job_url,
                     "description": "",
                     "source": "indeed",
-                    "posted_at": datetime.utcnow().isoformat(),
+                    "posted_at": datetime.now(timezone.utc).isoformat(),
                     "ats_type": "other",
                 })
             except Exception as e:
@@ -254,7 +254,7 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
                         "description": raw_content,
                         "description_text": strip_html(raw_content),
                         "source": "greenhouse",
-                        "posted_at": j.get("updated_at", datetime.utcnow().isoformat()),
+                        "posted_at": j.get("updated_at", datetime.now(timezone.utc).isoformat()),
                         "ats_type": "greenhouse",
                     })
             elif r.status_code == 404:
