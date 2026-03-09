@@ -25,6 +25,7 @@ def init_db():
             company         TEXT NOT NULL,
             location        TEXT,
             url             TEXT UNIQUE NOT NULL,
+            apply_url       TEXT,
             description     TEXT,
             source          TEXT,
             posted_at       TEXT,
@@ -63,11 +64,11 @@ def upsert_job(job: dict) -> bool:
     conn = get_conn()
     try:
         conn.execute("""
-            INSERT INTO jobs (id, title, company, location, url, description,
+            INSERT INTO jobs (id, title, company, location, url, apply_url, description,
                               source, posted_at, scraped_at, ats_type)
-            VALUES (:id, :title, :company, :location, :url, :description,
+            VALUES (:id, :title, :company, :location, :url, :apply_url, :description,
                     :source, :posted_at, :scraped_at, :ats_type)
-        """, {**job, "scraped_at": datetime.utcnow().isoformat()})
+        """, {**job, "apply_url": job.get("apply_url", ""), "scraped_at": datetime.utcnow().isoformat()})
         conn.commit()
         return True
     except sqlite3.IntegrityError:

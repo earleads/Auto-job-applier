@@ -23,6 +23,9 @@ def score_job(job: dict) -> int:
     Use Claude to score job fit 0–100 against candidate profile.
     Returns integer score.
     """
+    description = job.get('description', '').strip()
+    desc_section = description[:3000] if description else "(No description provided — score based on title, company, and location only)"
+
     prompt = f"""You are a career advisor evaluating job fit for a compliance professional targeting fintech and banking roles.
 
 CANDIDATE PROFILE:
@@ -33,7 +36,7 @@ Title: {job['title']}
 Company: {job['company']}
 Location: {job['location']}
 Description:
-{job.get('description', 'No description available')[:3000]}
+{desc_section}
 
 Score this job fit from 0 to 100 using these criteria:
 
@@ -49,6 +52,9 @@ The candidate has ~5 years of compliance experience (intern → associate analys
 Appropriate titles: Analyst, Senior Analyst, Associate, Specialist, Coordinator, junior Officer roles.
 Stretch but acceptable: Compliance Manager (if individual contributor or small team), Compliance Officer (non-senior).
 Too senior: Director, VP, Head of, Senior Manager, Lead, Principal — score 0.
+
+IMPORTANT — SCORING WITH LIMITED INFORMATION:
+If the description is missing or very short, score based on title + company alone. A job titled "Compliance Analyst" or "AML Analyst" at a known fintech/bank should still score 70+ even without a full description — the title and company are strong enough signals. Do NOT penalize a job just because the description is sparse. Only score low if the title or company clearly indicate a mismatch.
 
 SCORING RUBRIC:
 - 90-100: Perfect match — analyst/specialist compliance role at Series A+ fintech/bank, strong keyword alignment, appropriate seniority
