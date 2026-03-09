@@ -15,7 +15,6 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 CANDIDATE_PROFILE = """
 Name: Joe Allen
 Email: joespehallen90@gmail.com
-Phone: +1 678-555-0142
 LinkedIn: linkedin.com/in/joe-allen-264a53366
 Location: Atlanta, GA (open to remote / hybrid / relocation)
 
