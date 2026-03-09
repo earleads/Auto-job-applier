@@ -10,6 +10,7 @@ Usage:
     python main.py --stats      # Show stats and exit
     python main.py --dry-run    # Scrape + score but don't apply
     python main.py --test       # Quick run: 3 ATS companies, no browser, max 2 apps
+    python main.py --reset      # Clear job database before running (re-scrape everything)
 """
 
 import asyncio
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import SCRAPE_INTERVAL_HOURS, MAX_APPLICATIONS_PER_DAY, MIN_MATCH_SCORE, ANTHROPIC_API_KEY
+from config import SCRAPE_INTERVAL_HOURS, MAX_APPLICATIONS_PER_DAY, MIN_MATCH_SCORE, ANTHROPIC_API_KEY, DB_PATH
 from database import (
     init_db, get_jobs_by_status, update_job_score, update_job_status,
     log_application, count_today_applications, get_stats
@@ -56,6 +57,7 @@ def check_api_key():
 
 DRY_RUN = "--dry-run" in sys.argv
 TEST_MODE = "--test" in sys.argv
+RESET_DB = "--reset" in sys.argv
 REPORT_PATH = "data/run_report.txt"
 
 
@@ -248,6 +250,15 @@ async def run_pipeline():
 
 async def main():
     print_banner()
+
+    if RESET_DB:
+        db_file = Path(DB_PATH)
+        if db_file.exists():
+            db_file.unlink()
+            print("🗑️  Database cleared — all jobs will be re-scraped")
+        else:
+            print("🗑️  No database to clear — starting fresh")
+
     init_db()
 
     if "--stats" in sys.argv:
