@@ -51,6 +51,22 @@ def is_usa_location(location: str) -> bool:
     return True  # default allow — scraper casts wide, scorer filters
 
 
+def title_matches_compliance(title: str) -> bool:
+    """Fast check: does the job title look compliance-related?
+    Used to skip obviously irrelevant jobs (engineers, designers, etc.)
+    before even looking at the description."""
+    t = title.lower()
+    TITLE_KEYWORDS = [
+        "compliance", "aml", "bsa", "kyc", "financial crimes", "fincrime",
+        "sanctions", "fraud", "regulatory", "regtech",
+        "risk", "trust and safety", "trust & safety", "trust operations",
+        "due diligence", "cdd", "edd", "ofac", "fincen",
+        "anti-money laundering", "anti money laundering",
+        "transaction monitoring", "sar", "suspicious activity",
+    ]
+    return any(kw in t for kw in TITLE_KEYWORDS)
+
+
 def passes_keyword_filter(job: dict) -> bool:
     """
     Quick pre-filter before spending Claude tokens:
@@ -238,7 +254,8 @@ async def scrape_indeed(page: Page, query: str, location: str, first_run: bool =
 # ── Greenhouse ATS ─────────────────────────────────────────────────────────────
 
 async def scrape_greenhouse(company_slug: str) -> list[dict]:
-    """Fetch all open roles from Greenhouse API (no auth needed)."""
+    """Fetch compliance-related roles from Greenhouse API (no auth needed).
+    Filters by title first so we only process relevant jobs."""
     jobs = []
     url = f"https://boards-api.greenhouse.io/v1/boards/{company_slug}/jobs?content=true"
     try:
@@ -246,12 +263,21 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
             r = await client.get(url)
             if r.status_code == 200:
                 data = r.json()
+                total = len(data.get("jobs", []))
+                matched = 0
                 for j in data.get("jobs", []):
+                    title = j.get("title", "")
+                    # Skip jobs whose titles are clearly not compliance-related
+                    if not title_matches_compliance(title):
+                        continue
+                    matched += 1
                     job_url = j.get("absolute_url", "")
+                    if not job_url:
+                        continue  # Skip jobs with no apply URL
                     raw_content = j.get("content", "")
                     jobs.append({
                         "id": make_id(job_url),
-                        "title": j.get("title", ""),
+                        "title": title,
                         "company": company_slug.replace("-", " ").title(),
                         "location": ", ".join([l["name"] for l in j.get("offices", [])]),
                         "url": job_url,
@@ -261,6 +287,7 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
                         "posted_at": j.get("updated_at", datetime.now(timezone.utc).isoformat()),
                         "ats_type": "greenhouse",
                     })
+                print(f"  📋 Greenhouse {company_slug}: {matched} compliance roles / {total} total")
             elif r.status_code == 404:
                 pass  # Board doesn't exist or slug is wrong — silent
             else:
@@ -273,15 +300,26 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
 # ── Lever ATS ──────────────────────────────────────────────────────────────────
 
 async def scrape_lever(company_slug: str) -> list[dict]:
-    """Fetch all open roles from Lever API."""
+    """Fetch compliance-related roles from Lever API.
+    Filters by title first so we only process relevant jobs."""
     jobs = []
     url = f"https://api.lever.co/v0/postings/{company_slug}?mode=json"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(url)
             if r.status_code == 200:
-                for j in r.json():
+                all_jobs = r.json()
+                total = len(all_jobs)
+                matched = 0
+                for j in all_jobs:
+                    title = j.get("text", "")
+                    # Skip jobs whose titles are clearly not compliance-related
+                    if not title_matches_compliance(title):
+                        continue
+                    matched += 1
                     job_url = j.get("hostedUrl", "")
+                    if not job_url:
+                        continue  # Skip jobs with no apply URL
                     desc_parts = [
                         j.get("description", ""),
                         *[l.get("content", "") for l in j.get("lists", [])],
@@ -290,7 +328,7 @@ async def scrape_lever(company_slug: str) -> list[dict]:
                     raw_desc = "\n".join(filter(None, desc_parts))
                     jobs.append({
                         "id": make_id(job_url),
-                        "title": j.get("text", ""),
+                        "title": title,
                         "company": company_slug.replace("-", " ").title(),
                         "location": j.get("categories", {}).get("location", ""),
                         "url": job_url,
@@ -302,6 +340,7 @@ async def scrape_lever(company_slug: str) -> list[dict]:
                         ).isoformat(),
                         "ats_type": "lever",
                     })
+                print(f"  📋 Lever {company_slug}: {matched} compliance roles / {total} total")
             elif r.status_code == 404:
                 pass  # Board doesn't exist
             else:

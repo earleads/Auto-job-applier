@@ -344,7 +344,11 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
     job_for_apply = {**job, "url": apply_url}
 
     try:
-        if ats == "greenhouse":
+        # Guard: never try to navigate to an empty or invalid URL
+        if not job_for_apply.get("url") or not job_for_apply["url"].startswith("http"):
+            print(f"  ⏭️  Skipping {job.get('title', '?')} — no valid apply URL")
+            success = False
+        elif ats == "greenhouse":
             success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "lever":
             success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
