@@ -71,7 +71,18 @@ Output ONLY the answer (or SKIP), nothing else.
         messages=[{"role": "user", "content": prompt}]
     )
     answer = response.content[0].text.strip()
-    if answer == "SKIP" or len(answer) > 200:
+
+    # Detect refusals — Claude sometimes ignores SKIP and writes a paragraph
+    REFUSAL_PHRASES = [
+        "i cannot", "i can't", "i'm unable", "not available",
+        "not included", "not provided", "don't have", "do not have",
+        "cannot provide", "would typically be",
+    ]
+    answer_lower = answer.lower()
+    is_refusal = any(phrase in answer_lower for phrase in REFUSAL_PHRASES)
+
+    if answer == "SKIP" or is_refusal or len(answer) > 200:
+        print(f"    ⏭️  AI declined field: {label[:50]}")
         return None
     return answer
 
@@ -254,7 +265,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                     continue
                 answer = await ai_fill_field(label)
                 if answer:
-                    await input_el.fill(answer)
+                    try:
+                        await input_el.fill(answer, timeout=5000)
+                    except Exception as e:
+                        print(f"    ⚠️  Could not fill '{label[:40]}': {e}")
                 else:
                     print(f"    ⏭️  AI skipped field: {label}")
 
