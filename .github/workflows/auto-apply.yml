@@ -53,9 +53,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
         run: |
+          MODE="${{ inputs.mode }}"
+          # Default to test mode for scheduled runs (inputs are empty)
+          if [ -z "$MODE" ]; then MODE="test"; fi
           FLAGS=""
-          if [ "${{ inputs.mode }}" = "test" ]; then FLAGS="--test"; fi
-          if [ "${{ inputs.mode }}" = "dry-run" ]; then FLAGS="--dry-run"; fi
+          if [ "$MODE" = "test" ]; then FLAGS="--test"; fi
+          if [ "$MODE" = "dry-run" ]; then FLAGS="--dry-run"; fi
           if [ "${{ inputs.reset }}" = "true" ]; then FLAGS="$FLAGS --reset"; fi
           python main.py $FLAGS
 
