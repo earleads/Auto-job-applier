@@ -9,7 +9,7 @@ on:
       mode:
         description: 'Run mode'
         required: false
-        default: 'full'
+        default: 'test'
         type: choice
         options:
           - full
