@@ -87,6 +87,57 @@ async def safe_click(page: Page, selector: str, timeout: int = 3000):
         return False
 
 
+async def greenhouse_upload_file(page: Page, field_name: str, file_path: str) -> bool:
+    """Upload a file to Greenhouse's JS-based upload widget.
+
+    Greenhouse forms don't use standard <input type='file'> in the HTML.
+    Instead, clicking the 'Attach' button creates one dynamically via JS.
+    We trigger the click, wait for the hidden input, then set the file.
+
+    Falls back to the 'paste' textarea if file upload doesn't work.
+    """
+    try:
+        # Strategy 1: Click "Attach" to trigger dynamic file input creation
+        attach_btn = await page.query_selector(
+            f"[data-field='{field_name}'] button[data-source='attach']"
+        )
+        if attach_btn:
+            # Listen for the file input that JS will create
+            async with page.expect_file_chooser(timeout=5000) as fc_info:
+                await attach_btn.click()
+            file_chooser = await fc_info.value
+            await file_chooser.set_files(file_path)
+            await page.wait_for_timeout(2000)
+            # Check if filename appeared (upload success indicator)
+            filename_el = await page.query_selector(f"#{field_name}_filename")
+            if filename_el:
+                name_text = await filename_el.inner_text()
+                if name_text.strip():
+                    print(f"    📎 Uploaded {field_name}: {name_text.strip()}")
+                    return True
+
+        # Strategy 2: Use the "paste" textarea as fallback
+        paste_btn = await page.query_selector(
+            f"[data-field='{field_name}'] button[data-source='paste']"
+        )
+        if paste_btn and file_path.endswith(('.txt', '.text')):
+            await paste_btn.click()
+            await page.wait_for_timeout(500)
+            textarea = await page.query_selector(f"#{field_name}_text")
+            if textarea:
+                with open(file_path) as f:
+                    text = f.read()
+                await textarea.fill(text)
+                print(f"    📝 Pasted {field_name} text")
+                return True
+
+        print(f"    ⚠️  Could not upload {field_name}")
+        return False
+    except Exception as e:
+        print(f"    ⚠️  {field_name} upload error: {e}")
+        return False
+
+
 async def upload_file(page: Page, selector: str, file_path: str):
     """Upload a file to a file input. Selector can be comma-separated alternatives."""
     # Try each selector individually if comma-separated
@@ -128,16 +179,14 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         # Location (if asked)
         await safe_fill(page, "#job_application_location", APPLICANT["location"])
 
-        # Resume upload — try multiple selectors for the file input
-        resume_uploaded = await upload_file(page, "#resume_data, input[type='file'][id*='resume'], input[type='file']", cv_path)
-        if resume_uploaded:
-            await page.wait_for_timeout(1000)
+        # Resume upload — Greenhouse uses JS-based S3 upload, not <input type="file">
+        await greenhouse_upload_file(page, "resume", cv_path)
 
-        # Cover letter upload (if field exists)
-        cl_uploaded = await upload_file(page, "#cover_letter_data, input[type='file'][id*='cover']", cover_letter_path)
+        # Cover letter upload
+        await greenhouse_upload_file(page, "cover_letter", cover_letter_path)
 
-        # Handle custom questions — only process fields with non-empty labels
-        custom_fields = await page.query_selector_all(".field, .custom-question")
+        # Handle custom questions — Greenhouse wraps each in a .field div
+        custom_fields = await page.query_selector_all(".field")
         for field in custom_fields:
             label_el = await field.query_selector("label")
             label = (await label_el.inner_text()).strip() if label_el else ""
@@ -145,13 +194,21 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             # Skip empty labels and already-filled standard fields
             if not label:
                 continue
-            if any(kw in label.lower() for kw in [
-                "first name", "last name", "name", "email", "phone",
-                "resume", "cover letter", "linkedin", "location"
+            label_lower = label.lower()
+            if any(kw in label_lower for kw in [
+                "first name", "last name", "email", "phone",
+                "resume", "cover letter", "attach",
             ]):
                 continue
 
-            # Dropdowns
+            # LinkedIn — fill directly
+            if "linkedin" in label_lower:
+                input_el = await field.query_selector("input[type='text']")
+                if input_el:
+                    await input_el.fill(APPLICANT["linkedin"])
+                continue
+
+            # Dropdowns (select elements)
             select_el = await field.query_selector("select")
             if select_el:
                 options = await select_el.inner_text()
@@ -164,10 +221,13 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                         pass
                 continue
 
-            # Text areas / inputs
-            input_el = await field.query_selector("textarea, input[type='text'], input[type='url']")
+            # Text inputs (skip hidden inputs, textareas for paste, etc.)
+            input_el = await field.query_selector("input[type='text']:not([type='hidden']), input[type='url']")
             if input_el:
-                # Check if already has a value
+                # Skip if already filled or if it's a standard field
+                input_id = await input_el.get_attribute("id") or ""
+                if input_id in ("first_name", "last_name", "email", "phone", "dev-field-1"):
+                    continue
                 current_val = await input_el.input_value()
                 if current_val:
                     continue
