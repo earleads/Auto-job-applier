@@ -149,6 +149,7 @@ def get_stats() -> dict:
         "matched": conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('matched','applied')").fetchone()[0],
         "applied": conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0],
         "pending": conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'scored'").fetchone()[0],
+        "captcha_blocked": conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'captcha_blocked'").fetchone()[0],
     }
     conn.close()
     return stats

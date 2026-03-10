@@ -3,8 +3,10 @@ Auto-Applier — Playwright-based form submission for multiple ATS platforms.
 
 Supports:
   - LinkedIn Easy Apply
-  - Greenhouse (boards.greenhouse.io)
-  - Lever (jobs.lever.co)
+
+Disabled (CAPTCHA-protected — cannot auto-submit):
+  - Greenhouse (boards.greenhouse.io) — all forms have reCAPTCHA
+  - Lever (jobs.lever.co) — all forms have reCAPTCHA + hCaptcha
 """
 
 import asyncio
@@ -71,7 +73,18 @@ Output ONLY the answer (or SKIP), nothing else.
         messages=[{"role": "user", "content": prompt}]
     )
     answer = response.content[0].text.strip()
-    if answer == "SKIP" or len(answer) > 200:
+
+    # Detect refusals — Claude sometimes ignores SKIP and writes a paragraph
+    REFUSAL_PHRASES = [
+        "i cannot", "i can't", "i'm unable", "not available",
+        "not included", "not provided", "don't have", "do not have",
+        "cannot provide", "would typically be",
+    ]
+    answer_lower = answer.lower()
+    is_refusal = any(phrase in answer_lower for phrase in REFUSAL_PHRASES)
+
+    if answer == "SKIP" or is_refusal or len(answer) > 200:
+        print(f"    ⏭️  AI declined field: {label[:50]}")
         return None
     return answer
 
@@ -254,7 +267,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                     continue
                 answer = await ai_fill_field(label)
                 if answer:
-                    await input_el.fill(answer)
+                    try:
+                        await input_el.fill(answer, timeout=5000)
+                    except Exception as e:
+                        print(f"    ⚠️  Could not fill '{label[:40]}': {e}")
                 else:
                     print(f"    ⏭️  AI skipped field: {label}")
 
@@ -440,7 +456,7 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
 
 # ── Router ─────────────────────────────────────────────────────────────────────
 
-async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool:
+async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool | str:
     """Route application to correct ATS handler."""
     context = await browser.new_context(
         user_agent=(
@@ -462,9 +478,11 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             print(f"  ⏭️  Skipping {job.get('title', '?')} — no valid apply URL")
             success = False
         elif ats == "greenhouse":
-            success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
+            print(f"  🚫 Greenhouse has reCAPTCHA — cannot auto-apply: {job.get('title', '?')}")
+            success = "captcha_blocked"
         elif ats == "lever":
-            success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
+            print(f"  🚫 Lever has CAPTCHA — cannot auto-apply: {job.get('title', '?')}")
+            success = "captcha_blocked"
         elif ats == "linkedin":
             # No LinkedIn Easy Apply — skip jobs without external apply links
             print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
@@ -478,9 +496,9 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
     return success
 
 
-async def run_applications(jobs_with_docs: list[dict]) -> list[bool]:
+async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
     """
-    Apply to all qualified jobs. Returns list of success/failure per job.
+    Apply to all qualified jobs. Returns list of True/False/"captcha_blocked" per job.
     """
     if not jobs_with_docs:
         return []
