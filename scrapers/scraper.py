@@ -590,11 +590,11 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
 
     # 2. LinkedIn + Indeed (browser-based)
     if ENABLED_SOURCES.get("linkedin") or ENABLED_SOURCES.get("indeed"):
-        # In test mode, run browser with a small subset for end-to-end validation
+        # In test mode, use a minimal scope to get to scoring/applying ASAP
         if test_mode:
-            test_queries = SEARCH_QUERIES[:3]
+            test_queries = SEARCH_QUERIES[:1]
             test_locations = ["Remote"]
-            print(f"\n🧪 TEST MODE: browser scraping {len(test_queries)} queries × {len(test_locations)} locations")
+            print(f"\n🧪 TEST MODE: browser scraping 1 query × 1 location (fast path)")
         else:
             test_queries = SEARCH_QUERIES
             test_locations = LOCATIONS
@@ -621,17 +621,22 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
                         if ENABLED_SOURCES.get("linkedin"):
                             try:
                                 jobs = await scrape_linkedin(page, query, location, first_run=first_run)
+                                if test_mode:
+                                    jobs = jobs[:5]  # Cap results in test mode
                                 for job in jobs:
-                                    job = await fetch_linkedin_job_details(page, job)
+                                    if not test_mode:
+                                        # Full mode: fetch description from job page
+                                        job = await fetch_linkedin_job_details(page, job)
                                     if upsert_job(job):
                                         new_jobs += 1
                                         source_counts["linkedin"] += 1
                                         print(f"  ✅ NEW: {job['title']} @ {job['company']}")
-                                    await asyncio.sleep(1)
+                                    if not test_mode:
+                                        await asyncio.sleep(1)
                             except Exception as e:
                                 print(f"  ❌ LinkedIn scrape failed for '{query}' in {location}: {e}")
 
-                        if ENABLED_SOURCES.get("indeed"):
+                        if ENABLED_SOURCES.get("indeed") and not test_mode:
                             try:
                                 jobs = await scrape_indeed(page, query, location, first_run=first_run)
                                 for job in jobs:
@@ -641,7 +646,8 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
                             except Exception as e:
                                 print(f"  ❌ Indeed scrape failed for '{query}' in {location}: {e}")
 
-                        await asyncio.sleep(2)
+                        if not test_mode:
+                            await asyncio.sleep(2)
 
                 await browser.close()
         except Exception as e:
