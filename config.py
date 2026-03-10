@@ -274,8 +274,8 @@ TARGET_GEOGRAPHY = "United States"
 ENABLED_SOURCES = {
     "linkedin": True,
     "indeed": True,
-    "greenhouse": True,   # company ATS
-    "lever": True,        # company ATS
+    "greenhouse": False,  # DISABLED: all Greenhouse forms have reCAPTCHA — cannot auto-apply
+    "lever": False,       # DISABLED: all Lever forms have CAPTCHA — cannot auto-apply
 }
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────

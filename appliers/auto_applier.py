@@ -3,8 +3,10 @@ Auto-Applier — Playwright-based form submission for multiple ATS platforms.
 
 Supports:
   - LinkedIn Easy Apply
-  - Greenhouse (boards.greenhouse.io)
-  - Lever (jobs.lever.co)
+
+Disabled (CAPTCHA-protected — cannot auto-submit):
+  - Greenhouse (boards.greenhouse.io) — all forms have reCAPTCHA
+  - Lever (jobs.lever.co) — all forms have reCAPTCHA + hCaptcha
 """
 
 import asyncio
@@ -454,7 +456,7 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
 
 # ── Router ─────────────────────────────────────────────────────────────────────
 
-async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool:
+async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool | str:
     """Route application to correct ATS handler."""
     context = await browser.new_context(
         user_agent=(
@@ -476,9 +478,11 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             print(f"  ⏭️  Skipping {job.get('title', '?')} — no valid apply URL")
             success = False
         elif ats == "greenhouse":
-            success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
+            print(f"  🚫 Greenhouse has reCAPTCHA — cannot auto-apply: {job.get('title', '?')}")
+            success = "captcha_blocked"
         elif ats == "lever":
-            success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
+            print(f"  🚫 Lever has CAPTCHA — cannot auto-apply: {job.get('title', '?')}")
+            success = "captcha_blocked"
         elif ats == "linkedin":
             # No LinkedIn Easy Apply — skip jobs without external apply links
             print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
@@ -492,9 +496,9 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
     return success
 
 
-async def run_applications(jobs_with_docs: list[dict]) -> list[bool]:
+async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
     """
-    Apply to all qualified jobs. Returns list of success/failure per job.
+    Apply to all qualified jobs. Returns list of True/False/"captcha_blocked" per job.
     """
     if not jobs_with_docs:
         return []
