@@ -138,7 +138,15 @@ async def run_pipeline():
     scores = []
     scoring_errors = 0
 
+    captcha_blocked_count = 0
     for job in new_jobs:
+        # Skip Greenhouse/Lever jobs entirely — all have CAPTCHA, don't waste API tokens
+        ats = job.get("ats_type", "")
+        if ats in ("greenhouse", "lever"):
+            update_job_status(job["id"], "captcha_blocked")
+            captcha_blocked_count += 1
+            continue
+
         result = process_job(job)
 
         if result is None:
@@ -188,6 +196,10 @@ async def run_pipeline():
                     "cover_letter_path": result["cover_letter_path"],
                 })
 
+    if captcha_blocked_count > 0:
+        print(f"\n  🚫 Skipped {captcha_blocked_count} Greenhouse/Lever jobs (CAPTCHA — cannot auto-apply)")
+        report.append(f"CAPTCHA blocked: {captcha_blocked_count} (Greenhouse/Lever)")
+
     print(f"\n  → {len(qualified)} jobs qualified out of {len(new_jobs)} scored (+ {len(failed_jobs)} retries)")
     report.append(f"Scored: {len(new_jobs)} jobs")
     report.append(f"Qualified (score >= {MIN_MATCH_SCORE}): {len(qualified)}")
@@ -208,31 +220,13 @@ async def run_pipeline():
         print("\n[3/4] No qualified jobs to apply to this run.")
         report.append("Applications: 0 (no qualified jobs)")
     else:
-        # Separate CAPTCHA-blocked jobs (Greenhouse/Lever) from auto-appliable ones
-        auto_apply_items = []
-        pending_review_count = 0
-        for item in qualified:
-            ats = item["job"].get("ats_type", "")
-            if ats in ("greenhouse", "lever"):
-                update_job_status(item["job"]["id"], "pending_review")
-                pending_review_count += 1
-                report.append(f"  PENDING REVIEW: {item['job']['title']} @ {item['job']['company']}")
-            else:
-                auto_apply_items.append(item)
-
-        if pending_review_count > 0:
-            print(f"\n  📋 {pending_review_count} qualified Greenhouse/Lever jobs → pending_review (CAPTCHA)")
-
         # Respect daily application limit
         today_count = count_today_applications()
         max_apps = 2 if TEST_MODE else MAX_APPLICATIONS_PER_DAY
         remaining = max_apps - today_count
-        to_apply = auto_apply_items[:remaining]
+        to_apply = qualified[:remaining]
 
-        if not to_apply:
-            print(f"\n[3/4] No auto-appliable jobs this run ({pending_review_count} pending review).")
-            report.append(f"Applications: 0 auto-applied, {pending_review_count} pending review")
-        elif DRY_RUN:
+        if DRY_RUN:
             print(f"\n[3/4] DRY RUN: Would apply to {len(to_apply)} jobs")
             for item in to_apply:
                 print(f"  📄 {item['job']['title']} @ {item['job']['company']}")
