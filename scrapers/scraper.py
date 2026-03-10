@@ -20,12 +20,7 @@ from config import (
 from database import upsert_job, is_first_scrape
 
 US_LOCATION_HINTS = [
-    # State abbreviations (2-letter, used in "San Francisco, CA" format)
-    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
-    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
-    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
-    "VA","WA","WV","WI","WY",
-    # Full state names (common in Greenhouse/Lever location fields)
+    # Full state names (no false-positive risk from substring matching)
     "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
     "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
     "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
@@ -35,15 +30,27 @@ US_LOCATION_HINTS = [
     "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
     "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
     # Country-level
-    "United States","USA","U.S.","US",
-    # Remote (could be anywhere, but we allow it — Claude scoring will verify)
-    "Remote",
+    "United States",
     # Common US city names in fintech job postings
-    "New York","San Francisco","Los Angeles","Chicago","Boston","Austin",
+    "San Francisco","Los Angeles","Chicago","Boston","Austin",
     "Miami","Seattle","Denver","Atlanta","Dallas","Houston","Phoenix",
     "Portland","Minneapolis","Salt Lake City","Charlotte","Nashville",
     "Philadelphia","San Diego","San Jose","Palo Alto","Mountain View",
 ]
+
+# 2-letter codes that need word-boundary matching (regex \b)
+# to avoid "CA" matching inside "Locations", "IN" inside "India", etc.
+US_STATE_ABBREVS = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+    "VA","WA","WV","WI","WY","US","USA",
+}
+
+# Precompile regex: match 2-letter state codes as whole words only
+_STATE_ABBREV_RE = re.compile(
+    r'\b(' + '|'.join(sorted(US_STATE_ABBREVS, key=len, reverse=True)) + r')\b'
+)
 
 def strip_html(text: str) -> str:
     """Strip HTML tags to get plain text for keyword matching and scoring."""
@@ -55,19 +62,51 @@ def strip_html(text: str) -> str:
     return clean
 
 
+NON_US_COUNTRIES = [
+    "canada", "uk", "united kingdom", "ireland", "india", "singapore",
+    "australia", "germany", "france", "netherlands", "poland", "luxembourg",
+    "brazil", "mexico", "japan", "korea", "hong kong", "israel", "cyprus",
+    "argentina", "colombia", "nigeria", "kenya", "south africa", "philippines",
+    "lithuania", "portugal", "spain", "italy", "sweden", "denmark", "norway",
+    "finland", "switzerland", "austria", "czech", "romania", "hungary",
+    "turkey", "egypt", "thailand", "vietnam", "indonesia", "malaysia",
+    "taiwan", "china", "dubai", "uae",
+]
+
+
 def is_usa_location(location: str) -> bool:
-    """True only if location explicitly matches a US state, city, or 'Remote'.
+    """True only if location explicitly matches a US state, city, or US-Remote.
     Unknown or non-US locations are rejected — no more wasting Claude tokens
-    scoring jobs in Luxembourg, Mexico, Ireland, etc."""
+    scoring jobs in Luxembourg, Mexico, Ireland, etc.
+
+    Special handling for 'Remote':
+    - 'Remote' alone → True (assume US unless stated otherwise)
+    - 'Remote US' / 'Remote, US' → True
+    - 'Remote - Canada' / 'Remote Poland' / 'UK - Remote' → False
+    """
     if not location:
-        return False  # no location info = reject (don't guess)
+        return False  # no location info = reject
     loc = location.strip()
-    # Check for US hints (case-insensitive)
     loc_lower = loc.lower()
+
+    # First: reject if any non-US country is mentioned anywhere in the string
+    if any(country in loc_lower for country in NON_US_COUNTRIES):
+        return False
+
+    # Allow "Remote" (only if no non-US country was found above)
+    if "remote" in loc_lower:
+        return True
+
+    # Check full state/city names (substring match is safe for long names)
     for hint in US_LOCATION_HINTS:
         if hint.lower() in loc_lower:
             return True
-    return False  # not recognized as US → reject
+
+    # Check 2-letter state abbreviations with word boundaries
+    if _STATE_ABBREV_RE.search(loc):
+        return True
+
+    return False
 
 
 def title_matches_compliance(title: str) -> bool:
@@ -332,20 +371,23 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
                         continue
                     matched += 1
                     job_id = j.get("id", "")
-                    job_url = j.get("absolute_url", "")
-                    if not job_url and job_id:
-                        # Construct URL from slug + job ID as fallback
-                        job_url = f"https://boards.greenhouse.io/{company_slug}/jobs/{job_id}"
-                    if not job_url:
-                        print(f"    ⚠️  Skipping '{title}' — no URL available")
+                    # The company's careers page URL (for display/reference)
+                    listing_url = j.get("absolute_url", "")
+                    if not listing_url and job_id:
+                        listing_url = f"https://boards.greenhouse.io/{company_slug}/jobs/{job_id}"
+                    if not listing_url and not job_id:
+                        print(f"    ⚠️  Skipping '{title}' — no URL or ID available")
                         continue
+                    # The actual Greenhouse application form URL (for auto-apply)
+                    apply_url = f"https://boards.greenhouse.io/embed/job_app?for={company_slug}&token={job_id}" if job_id else ""
                     raw_content = j.get("content", "")
                     jobs.append({
-                        "id": make_id(job_url),
+                        "id": make_id(listing_url),
                         "title": title,
                         "company": company_slug.replace("-", " ").title(),
                         "location": ", ".join([l["name"] for l in j.get("offices", [])]),
-                        "url": job_url,
+                        "url": listing_url,
+                        "apply_url": apply_url,
                         "description": raw_content,
                         "description_text": strip_html(raw_content),
                         "source": "greenhouse",
