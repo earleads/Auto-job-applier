@@ -88,13 +88,19 @@ async def safe_click(page: Page, selector: str, timeout: int = 3000):
 
 
 async def upload_file(page: Page, selector: str, file_path: str):
-    try:
-        el = await page.wait_for_selector(selector, timeout=5000)
-        await el.set_input_files(file_path)
-        return True
-    except Exception as e:
-        print(f"    ⚠️  File upload failed: {e}")
-        return False
+    """Upload a file to a file input. Selector can be comma-separated alternatives."""
+    # Try each selector individually if comma-separated
+    selectors = [s.strip() for s in selector.split(",")]
+    for sel in selectors:
+        try:
+            el = await page.wait_for_selector(sel, timeout=3000)
+            if el:
+                await el.set_input_files(file_path)
+                return True
+        except Exception:
+            continue
+    print(f"    ⚠️  File upload: no matching input found")
+    return False
 
 
 # ── Greenhouse Applier ─────────────────────────────────────────────────────────
@@ -102,38 +108,47 @@ async def upload_file(page: Page, selector: str, file_path: str):
 async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_path: str) -> bool:
     """
     Apply via Greenhouse embedded application form.
+    URL format: https://boards.greenhouse.io/embed/job_app?for={slug}&token={job_id}
     """
     print(f"  🌿 Greenhouse apply: {job['url']}")
     try:
         await page.goto(job["url"], timeout=30000)
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(3000)
 
-        # Standard Greenhouse fields
+        # Standard Greenhouse embed form fields
         await safe_fill(page, "#first_name", APPLICANT["first_name"])
         await safe_fill(page, "#last_name", APPLICANT["last_name"])
         await safe_fill(page, "#email", APPLICANT["email"])
         await safe_fill(page, "#phone", APPLICANT["phone"])
 
-        # LinkedIn URL (optional)
+        # LinkedIn URL — try multiple selectors
         await safe_fill(page, "input[name*='linkedin']", APPLICANT["linkedin"])
+        await safe_fill(page, "input[autocomplete='url']", APPLICANT["linkedin"])
 
-        # Resume upload
-        await upload_file(page, "input[type='file'][name*='resume']", cv_path)
-        await page.wait_for_timeout(1000)
+        # Location (if asked)
+        await safe_fill(page, "#job_application_location", APPLICANT["location"])
+
+        # Resume upload — try multiple selectors for the file input
+        resume_uploaded = await upload_file(page, "#resume_data, input[type='file'][id*='resume'], input[type='file']", cv_path)
+        if resume_uploaded:
+            await page.wait_for_timeout(1000)
 
         # Cover letter upload (if field exists)
-        cl_input = await page.query_selector("input[type='file'][name*='cover']")
-        if cl_input:
-            await cl_input.set_input_files(cover_letter_path)
+        cl_uploaded = await upload_file(page, "#cover_letter_data, input[type='file'][id*='cover']", cover_letter_path)
 
-        # Handle custom questions
-        custom_fields = await page.query_selector_all(".field")
+        # Handle custom questions — only process fields with non-empty labels
+        custom_fields = await page.query_selector_all(".field, .custom-question")
         for field in custom_fields:
             label_el = await field.query_selector("label")
             label = (await label_el.inner_text()).strip() if label_el else ""
 
-            # Skip already-filled standard fields
-            if any(kw in label.lower() for kw in ["name", "email", "phone", "resume", "cover"]):
+            # Skip empty labels and already-filled standard fields
+            if not label:
+                continue
+            if any(kw in label.lower() for kw in [
+                "first name", "last name", "name", "email", "phone",
+                "resume", "cover letter", "linkedin", "location"
+            ]):
                 continue
 
             # Dropdowns
@@ -141,23 +156,35 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             if select_el:
                 options = await select_el.inner_text()
                 option_list = [o.strip() for o in options.split("\n") if o.strip()]
-                answer = await ai_fill_field(label, option_list)
-                await select_el.select_option(label=answer)
+                if option_list:
+                    answer = await ai_fill_field(label, option_list)
+                    try:
+                        await select_el.select_option(label=answer)
+                    except Exception:
+                        pass
                 continue
 
             # Text areas / inputs
-            input_el = await field.query_selector("textarea, input[type='text']")
+            input_el = await field.query_selector("textarea, input[type='text'], input[type='url']")
             if input_el:
+                # Check if already has a value
+                current_val = await input_el.input_value()
+                if current_val:
+                    continue
                 answer = await ai_fill_field(label)
                 await input_el.fill(answer)
 
         # Submit
-        await safe_click(page, "#submit_app, button[type='submit']")
-        await page.wait_for_timeout(3000)
+        submit_clicked = await safe_click(page, "#submit_app, button[type='submit'], input[type='submit']")
+        if not submit_clicked:
+            print(f"  ⚠️  Could not find submit button")
+            return False
+
+        await page.wait_for_timeout(5000)
 
         # Check for success
         content = await page.content()
-        if any(kw in content.lower() for kw in ["thank you", "submitted", "application received"]):
+        if any(kw in content.lower() for kw in ["thank you", "submitted", "application received", "application has been"]):
             print(f"  ✅ Greenhouse application submitted!")
             return True
         else:
