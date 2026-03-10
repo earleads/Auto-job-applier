@@ -155,13 +155,26 @@ def title_matches_compliance(title: str) -> bool:
     COMBO_KEYWORDS = [
         "fraud analyst", "fraud investigator", "fraud specialist",
         "risk analyst", "risk associate", "risk specialist",
+        "risk operations", "risk ops",
         "trust and safety", "trust & safety",
+        "operations analyst",  # often paired with compliance/AML in description
+        "financial crimes", "fincrime",
     ]
     has_combo = any(kw in t for kw in COMBO_KEYWORDS)
 
-    # Require domain + role, or a specific combo keyword
-    # domain alone is not enough (e.g. "Product Manager, Compliance Platform" is not a compliance role)
-    return (has_domain and has_role) or has_combo
+    # Strong domain signals that are themselves a role (not just a topic)
+    STANDALONE_DOMAIN = [
+        "compliance analyst", "compliance specialist", "compliance officer",
+        "compliance associate", "compliance coordinator", "compliance advisor",
+        "aml analyst", "aml specialist", "aml officer", "aml associate",
+        "bsa analyst", "bsa officer", "bsa specialist",
+        "kyc analyst", "kyc specialist", "kyc associate",
+        "sanctions analyst", "transaction monitoring",
+    ]
+    has_standalone = any(kw in t for kw in STANDALONE_DOMAIN)
+
+    # Require domain + role, or a specific combo keyword, or a standalone match
+    return (has_domain and has_role) or has_combo or has_standalone
 
 
 def passes_keyword_filter(job: dict) -> bool:
