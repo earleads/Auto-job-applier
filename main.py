@@ -9,7 +9,7 @@ Usage:
     python main.py --loop       # Run on schedule (every N hours)
     python main.py --stats      # Show stats and exit
     python main.py --dry-run    # Scrape + score but don't apply
-    python main.py --test       # Quick run: 3 ATS companies, no browser, max 2 apps
+    python main.py --test       # Quick run: 1 LinkedIn query, skip detail fetch, max 2 apps
     python main.py --reset      # Clear job database before running (re-scrape everything)
 """
 
@@ -105,7 +105,7 @@ async def run_pipeline():
     print(f"\n{'='*54}")
     print(f"🚀 Pipeline started at {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
     if TEST_MODE:
-        print("🧪 TEST MODE — limited scrape (3 ATS companies, 2 LinkedIn queries)")
+        print("🧪 TEST MODE — 1 LinkedIn query, up to 5 jobs, skip detail fetch")
         report.append("Mode: TEST")
     if DRY_RUN:
         print("🔍 DRY RUN MODE — applications will not be submitted")
