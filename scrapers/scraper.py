@@ -277,13 +277,38 @@ async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
         await page.goto(job["url"], timeout=20000)
         await page.wait_for_timeout(2000)
 
-        # Try to expand "Show more"
+        # Dismiss LinkedIn's login/signup modal if it appears
+        # (blocks clicks on public job pages for non-logged-in users)
+        try:
+            modal_dismiss = await page.query_selector(
+                "button[data-tracking-control-name='public_jobs_apply-link-offsite_sign-up-modal_modal_dismiss'], "
+                ".modal__dismiss, "
+                "button.contextual-sign-in-modal__modal-dismiss, "
+                "button[aria-label='Dismiss']"
+            )
+            if modal_dismiss:
+                await modal_dismiss.click(timeout=2000)
+                await page.wait_for_timeout(500)
+        except Exception:
+            # Modal might auto-dismiss or not exist — safe to ignore
+            pass
+
+        # Try to expand "Show more" with a short timeout
         see_more = await page.query_selector("button.show-more-less-html__button")
         if see_more:
-            await see_more.click()
-            await page.wait_for_timeout(500)
+            try:
+                await see_more.click(timeout=3000)
+                await page.wait_for_timeout(500)
+            except Exception:
+                # If the click is still blocked, just grab whatever text is visible
+                pass
 
-        desc_el = await page.query_selector(".description__text")
+        # Try multiple selectors — the modal may hide some elements
+        desc_el = await page.query_selector(
+            ".description__text, "
+            ".show-more-less-html__markup, "
+            ".decorated-job-posting__details"
+        )
         if desc_el:
             job["description"] = (await desc_el.inner_text()).strip()
 
