@@ -19,16 +19,30 @@ from config import (
 )
 from database import upsert_job, is_first_scrape
 
-US_STATE_HINTS = [
+US_LOCATION_HINTS = [
+    # State abbreviations (2-letter, used in "San Francisco, CA" format)
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
     "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
     "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
-    "VA","WA","WV","WI","WY","United States","USA","Remote",
-]
-
-NON_US_HINTS = [
-    "United Kingdom","London"," UK","Canada","Toronto","India","Bengaluru",
-    "Singapore","Australia","Germany","France","Netherlands","Dublin","Poland",
+    "VA","WA","WV","WI","WY",
+    # Full state names (common in Greenhouse/Lever location fields)
+    "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
+    "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
+    "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
+    "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+    "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
+    "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
+    "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+    "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+    # Country-level
+    "United States","USA","U.S.","US",
+    # Remote (could be anywhere, but we allow it — Claude scoring will verify)
+    "Remote",
+    # Common US city names in fintech job postings
+    "New York","San Francisco","Los Angeles","Chicago","Boston","Austin",
+    "Miami","Seattle","Denver","Atlanta","Dallas","Houston","Phoenix",
+    "Portland","Minneapolis","Salt Lake City","Charlotte","Nashville",
+    "Philadelphia","San Diego","San Jose","Palo Alto","Mountain View",
 ]
 
 def strip_html(text: str) -> str:
@@ -42,13 +56,18 @@ def strip_html(text: str) -> str:
 
 
 def is_usa_location(location: str) -> bool:
-    """True if location appears to be US-based or remote."""
+    """True only if location explicitly matches a US state, city, or 'Remote'.
+    Unknown or non-US locations are rejected — no more wasting Claude tokens
+    scoring jobs in Luxembourg, Mexico, Ireland, etc."""
     if not location:
-        return True  # unknown — let Claude's scoring decide
+        return False  # no location info = reject (don't guess)
     loc = location.strip()
-    if any(h.lower() in loc.lower() for h in NON_US_HINTS):
-        return False
-    return True  # default allow — scraper casts wide, scorer filters
+    # Check for US hints (case-insensitive)
+    loc_lower = loc.lower()
+    for hint in US_LOCATION_HINTS:
+        if hint.lower() in loc_lower:
+            return True
+    return False  # not recognized as US → reject
 
 
 def title_matches_compliance(title: str) -> bool:
@@ -464,9 +483,11 @@ async def run_scrapers(test_mode: bool = False) -> tuple[int, dict[str, int]]:
 
     companies = TARGET_COMPANIES
     if test_mode:
-        # Pick first 3 companies that have ATS mappings for a quick check
-        companies = [c for c in TARGET_COMPANIES if c in COMPANY_ATS_MAP][:3]
-        print(f"\n🧪 TEST MODE: scraping only {len(companies)} ATS companies: {companies}")
+        # Scrape ALL companies with ATS mappings — the title + location filters
+        # are fast enough, and we need enough coverage to actually find US roles.
+        # Typical run: ~40 companies, ~2-5 seconds total (lightweight API calls).
+        companies = [c for c in TARGET_COMPANIES if c in COMPANY_ATS_MAP]
+        print(f"\n🧪 TEST MODE: scraping {len(companies)} ATS companies (API only, no browser)")
 
     # 1. Direct ATS scrapes (no browser needed — most reliable)
     print("\n📡 Scraping company ATS pages...")
