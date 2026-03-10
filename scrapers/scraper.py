@@ -54,17 +54,56 @@ def is_usa_location(location: str) -> bool:
 def title_matches_compliance(title: str) -> bool:
     """Fast check: does the job title look compliance-related?
     Used to skip obviously irrelevant jobs (engineers, designers, etc.)
-    before even looking at the description."""
+    before even looking at the description.
+
+    We require BOTH:
+    1. A compliance-domain keyword (what the job is about)
+    2. An analyst-level role keyword (seniority check) — OR the domain
+       keyword IS the role (e.g. "Compliance Analyst" has both)
+    """
     t = title.lower()
-    TITLE_KEYWORDS = [
+
+    # Domain keywords — what the job is about
+    DOMAIN_KEYWORDS = [
         "compliance", "aml", "bsa", "kyc", "financial crimes", "fincrime",
-        "sanctions", "fraud", "regulatory", "regtech",
-        "risk", "trust and safety", "trust & safety", "trust operations",
-        "due diligence", "cdd", "edd", "ofac", "fincen",
+        "sanctions", "regulatory", "regtech",
         "anti-money laundering", "anti money laundering",
-        "transaction monitoring", "sar", "suspicious activity",
+        "transaction monitoring", "suspicious activity",
+        "ofac", "fincen", "due diligence", "cdd", "edd",
     ]
-    return any(kw in t for kw in TITLE_KEYWORDS)
+
+    # Role keywords — appropriate seniority level
+    ROLE_KEYWORDS = [
+        "analyst", "associate", "specialist", "coordinator", "officer",
+        "advisor", "examiner", "investigator", "reviewer", "manager",
+    ]
+
+    # Title patterns that should NOT match even if they contain domain keywords
+    TITLE_EXCLUDES = [
+        "program manager", "product manager", "engineering manager",
+        "software engineer", "machine learning", "data engineer",
+        "designer", "counsel", "attorney", "lawyer", "recruiter",
+        "sales", "marketing", "partner development",
+    ]
+    if any(ex in t for ex in TITLE_EXCLUDES):
+        return False
+
+    # Broader domain keywords that are OK even without a role keyword
+    # (e.g. "AML Analyst" or just "Compliance" in the title)
+    has_domain = any(kw in t for kw in DOMAIN_KEYWORDS)
+    has_role = any(kw in t for kw in ROLE_KEYWORDS)
+
+    # Also accept "fraud analyst", "risk analyst" but NOT "risk ops program manager"
+    COMBO_KEYWORDS = [
+        "fraud analyst", "fraud investigator", "fraud specialist",
+        "risk analyst", "risk associate", "risk specialist",
+        "trust and safety", "trust & safety",
+    ]
+    has_combo = any(kw in t for kw in COMBO_KEYWORDS)
+
+    # Require domain + role, or a specific combo keyword
+    # domain alone is not enough (e.g. "Product Manager, Compliance Platform" is not a compliance role)
+    return (has_domain and has_role) or has_combo
 
 
 def passes_keyword_filter(job: dict) -> bool:
@@ -273,9 +312,14 @@ async def scrape_greenhouse(company_slug: str) -> list[dict]:
                     if not title_matches_compliance(title):
                         continue
                     matched += 1
+                    job_id = j.get("id", "")
                     job_url = j.get("absolute_url", "")
+                    if not job_url and job_id:
+                        # Construct URL from slug + job ID as fallback
+                        job_url = f"https://boards.greenhouse.io/{company_slug}/jobs/{job_id}"
                     if not job_url:
-                        continue  # Skip jobs with no apply URL
+                        print(f"    ⚠️  Skipping '{title}' — no URL available")
+                        continue
                     raw_content = j.get("content", "")
                     jobs.append({
                         "id": make_id(job_url),
