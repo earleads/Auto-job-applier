@@ -42,10 +42,11 @@ APPLICANT = {
 
 # ── AI Form Field Resolver ─────────────────────────────────────────────────────
 
-async def ai_fill_field(label: str, options: list[str] = None) -> str:
+async def ai_fill_field(label: str, options: list[str] = None) -> str | None:
     """
     Ask Claude what to answer for an unusual form field.
     Used for custom questions like "Why do you want to work here?"
+    Returns None if the field should be skipped.
     """
     prompt = f"""You are filling out a job application form on behalf of this candidate:
 
@@ -57,14 +58,22 @@ Form field label: "{label}"
 Provide the best answer for this field. Be concise and genuine.
 If it's a dropdown/multiple choice, return exactly one of the provided options.
 Otherwise return a short text answer (under 100 words).
-Output ONLY the answer, nothing else.
+
+IMPORTANT: If you cannot answer because the field asks for something you don't have
+(security codes, CAPTCHAs, verification codes, SSN, passwords, salary expectations
+with no basis, etc.), respond with exactly: SKIP
+
+Output ONLY the answer (or SKIP), nothing else.
 """
     response = _client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=150,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text.strip()
+    answer = response.content[0].text.strip()
+    if answer == "SKIP" or len(answer) > 200:
+        return None
+    return answer
 
 
 # ── Generic helpers ────────────────────────────────────────────────────────────
@@ -201,6 +210,17 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             ]):
                 continue
 
+            # Skip fields we can't/shouldn't fill
+            SKIP_FIELDS = [
+                "security", "captcha", "verification", "verify",
+                "password", "ssn", "social security", "eeoc",
+                "gender", "race", "ethnicity", "veteran", "disability",
+                "i-9", "w-4", "authorization code",
+            ]
+            if any(kw in label_lower for kw in SKIP_FIELDS):
+                print(f"    ⏭️  Skipping field: {label}")
+                continue
+
             # LinkedIn — fill directly
             if "linkedin" in label_lower:
                 input_el = await field.query_selector("input[type='text']")
@@ -215,10 +235,11 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                 option_list = [o.strip() for o in options.split("\n") if o.strip()]
                 if option_list:
                     answer = await ai_fill_field(label, option_list)
-                    try:
-                        await select_el.select_option(label=answer)
-                    except Exception:
-                        pass
+                    if answer:
+                        try:
+                            await select_el.select_option(label=answer)
+                        except Exception:
+                            pass
                 continue
 
             # Text inputs (skip hidden inputs, textareas for paste, etc.)
@@ -232,7 +253,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                 if current_val:
                     continue
                 answer = await ai_fill_field(label)
-                await input_el.fill(answer)
+                if answer:
+                    await input_el.fill(answer)
+                else:
+                    print(f"    ⏭️  AI skipped field: {label}")
 
         # Submit
         submit_clicked = await safe_click(page, "#submit_app, button[type='submit'], input[type='submit']")
@@ -295,7 +319,8 @@ async def apply_lever(page: Page, job: dict, cv_path: str, cover_letter_path: st
             input_el = await field.query_selector("input[type='text'], textarea")
             if input_el and label:
                 answer = await ai_fill_field(label)
-                await input_el.fill(answer)
+                if answer:
+                    await input_el.fill(answer)
 
         # Submit
         await safe_click(page, "button[type='submit'], input[type='submit']")
@@ -372,7 +397,8 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
                     current = await input_el.input_value()
                     if not current:
                         answer = await ai_fill_field(label)
-                        await input_el.fill(answer)
+                        if answer:
+                            await input_el.fill(answer)
 
                 # Dropdowns
                 select_el = await item.query_selector("select")
