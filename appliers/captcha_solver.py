@@ -41,38 +41,70 @@ async def _solve_with_capsolver(page) -> bool:
     Extracts the sitekey, sends a solve task, polls for the token,
     and injects it into the page's reCAPTCHA response field.
     """
-    sitekey = await page.evaluate("""() => {
+    # Extract sitekey and detect if invisible reCAPTCHA
+    captcha_info = await page.evaluate("""() => {
         const el = document.querySelector('[data-sitekey]');
-        if (el) return el.getAttribute('data-sitekey');
+        if (el) {
+            return {
+                sitekey: el.getAttribute('data-sitekey'),
+                invisible: el.getAttribute('data-size') === 'invisible'
+                    || el.classList.contains('g-recaptcha-invisible')
+            };
+        }
         const iframe = document.querySelector("iframe[src*='recaptcha']");
         if (iframe) {
             const match = iframe.src.match(/[?&]k=([^&]+)/);
-            return match ? match[1] : null;
+            return {
+                sitekey: match ? match[1] : null,
+                invisible: iframe.src.includes('size=invisible')
+            };
         }
-        return null;
+        return { sitekey: null, invisible: false };
     }""")
+
+    sitekey = captcha_info.get("sitekey")
+    is_invisible = captcha_info.get("invisible", False)
 
     if not sitekey:
         print("    ⚠️  CapSolver: Could not find reCAPTCHA sitekey")
         return False
 
     page_url = page.url
-    print(f"    🔑 CapSolver: Sending solve request...")
+    captcha_type = "invisible" if is_invisible else "checkbox"
+    print(f"    🔑 CapSolver: Sending solve request ({captcha_type} reCAPTCHA)...")
 
     async with httpx.AsyncClient(timeout=120) as client:
+        task = {
+            "type": "ReCaptchaV2TaskProxyLess",
+            "websiteURL": page_url,
+            "websiteKey": sitekey,
+        }
+        if is_invisible:
+            task["isInvisible"] = True
+
         resp = await client.post(CAPSOLVER_CREATE_URL, json={
             "clientKey": CAPSOLVER_API_KEY,
-            "task": {
-                "type": "ReCaptchaV2TaskProxyLess",
-                "websiteURL": page_url,
-                "websiteKey": sitekey,
-            }
+            "task": task,
         })
         data = resp.json()
 
         if data.get("errorId", 0) != 0:
-            print(f"    ❌ CapSolver create error: {data.get('errorDescription', data)}")
-            return False
+            error_desc = data.get("errorDescription", "")
+            # If "invalid input" error, retry with invisible flag toggled
+            if "invalid input" in error_desc.lower() and not is_invisible:
+                print(f"    🔄 Retrying as invisible reCAPTCHA...")
+                task["isInvisible"] = True
+                resp = await client.post(CAPSOLVER_CREATE_URL, json={
+                    "clientKey": CAPSOLVER_API_KEY,
+                    "task": task,
+                })
+                data = resp.json()
+                if data.get("errorId", 0) != 0:
+                    print(f"    ❌ CapSolver create error: {data.get('errorDescription', data)}")
+                    return False
+            else:
+                print(f"    ❌ CapSolver create error: {error_desc or data}")
+                return False
 
         task_id = data["taskId"]
         print(f"    ⏳ CapSolver: Waiting for solution...")
