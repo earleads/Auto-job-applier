@@ -1,5 +1,6 @@
 .env
 data/
+screenshots/
 __pycache__/
 *.pyc
 yolov8m-seg.pt
