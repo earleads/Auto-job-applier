@@ -1,24 +1,28 @@
 """
-CAPTCHA Solver — Free reCAPTCHA solving using the recognizer library.
+CAPTCHA Solver — reCAPTCHA v2 solving with two strategies:
 
-Uses YOLO + CLIP AI models to solve reCAPTCHA v2 image challenges locally.
-No paid API keys required — all solving runs on-device.
+1. CapSolver API (primary, when CAPSOLVER_API_KEY is set) — reliable on CI/datacenter IPs
+2. Free YOLO + CLIP via recognizer library (fallback, no API key needed)
 
-Strategy for tough environments (CI/datacenter IPs):
-  - Multiple attempts with increasing timeouts
-  - Page reload between attempts to get a fresh/easier challenge
-  - Longer waits to let reCAPTCHA fully load before solving
+When CAPSOLVER_API_KEY is configured, goes straight to CapSolver without
+wasting attempts on the free solver (failed free attempts make reCAPTCHA harder).
 """
 
 import asyncio
+import httpx
 from recognizer.agents.playwright import AsyncChallenger
 
-# Escalating timeout strategy: start fast, get more patient
+from config import CAPSOLVER_API_KEY
+
+CAPSOLVER_CREATE_URL = "https://api.capsolver.com/createTask"
+CAPSOLVER_RESULT_URL = "https://api.capsolver.com/getTaskResult"
+
+# Escalating timeout strategy for the free solver
 _ATTEMPT_CONFIGS = [
-    {"click_timeout": 1500, "pre_wait": 1000},   # Quick first try
-    {"click_timeout": 3000, "pre_wait": 2000},   # Slower, let it load
-    {"click_timeout": 5000, "pre_wait": 3000},   # Patient
-    {"click_timeout": 8000, "pre_wait": 5000},   # Very patient (after reload)
+    {"click_timeout": 1500, "pre_wait": 1000},
+    {"click_timeout": 3000, "pre_wait": 2000},
+    {"click_timeout": 5000, "pre_wait": 3000},
+    {"click_timeout": 8000, "pre_wait": 5000},
 ]
 
 
@@ -30,38 +34,135 @@ async def _is_captcha_present(page) -> bool:
     return el is not None
 
 
-async def _try_solve(page, click_timeout: int) -> bool:
-    """Single solve attempt. Returns True on success, raises on failure."""
-    challenger = AsyncChallenger(page, click_timeout=click_timeout)
-    await challenger.solve_recaptcha()
-    return True
-
-
-async def detect_and_solve(page, allow_reload: bool = True) -> bool:
+async def _solve_with_capsolver(page) -> bool:
     """
-    Attempt to solve any reCAPTCHA on the current page.
+    Solve reCAPTCHA v2 using CapSolver's API.
 
-    Uses multiple attempts with escalating timeouts. On the 3rd+ attempt,
-    reloads the page to get a fresh challenge (often easier).
-
-    Args:
-        page: Patchright page object
-        allow_reload: If True, reload the page on later attempts for a fresh challenge
-
-    Returns True if no CAPTCHA or CAPTCHA was solved, False if blocked.
+    Extracts the sitekey, sends a solve task, polls for the token,
+    and injects it into the page's reCAPTCHA response field.
     """
-    if not await _is_captcha_present(page):
-        return True  # No CAPTCHA — all clear
+    # Extract sitekey and detect if invisible reCAPTCHA
+    captcha_info = await page.evaluate("""() => {
+        const el = document.querySelector('[data-sitekey]');
+        if (el) {
+            return {
+                sitekey: el.getAttribute('data-sitekey'),
+                invisible: el.getAttribute('data-size') === 'invisible'
+                    || el.classList.contains('g-recaptcha-invisible')
+            };
+        }
+        const iframe = document.querySelector("iframe[src*='recaptcha']");
+        if (iframe) {
+            const match = iframe.src.match(/[?&]k=([^&]+)/);
+            return {
+                sitekey: match ? match[1] : null,
+                invisible: iframe.src.includes('size=invisible')
+            };
+        }
+        return { sitekey: null, invisible: false };
+    }""")
 
-    print("    🔐 reCAPTCHA detected — solving with AI (YOLO + CLIP)...")
+    sitekey = captcha_info.get("sitekey")
+    is_invisible = captcha_info.get("invisible", False)
+
+    if not sitekey:
+        print("    ⚠️  CapSolver: Could not find reCAPTCHA sitekey")
+        return False
+
+    page_url = page.url
+    captcha_type = "invisible" if is_invisible else "checkbox"
+    print(f"    🔑 CapSolver: Sending solve request ({captcha_type} reCAPTCHA)...")
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        task = {
+            "type": "ReCaptchaV2TaskProxyLess",
+            "websiteURL": page_url,
+            "websiteKey": sitekey,
+        }
+        if is_invisible:
+            task["isInvisible"] = True
+
+        resp = await client.post(CAPSOLVER_CREATE_URL, json={
+            "clientKey": CAPSOLVER_API_KEY,
+            "task": task,
+        })
+        data = resp.json()
+
+        if data.get("errorId", 0) != 0:
+            error_desc = data.get("errorDescription", "")
+            # If "invalid input" error, retry with invisible flag toggled
+            if "invalid input" in error_desc.lower() and not is_invisible:
+                print(f"    🔄 Retrying as invisible reCAPTCHA...")
+                task["isInvisible"] = True
+                resp = await client.post(CAPSOLVER_CREATE_URL, json={
+                    "clientKey": CAPSOLVER_API_KEY,
+                    "task": task,
+                })
+                data = resp.json()
+                if data.get("errorId", 0) != 0:
+                    print(f"    ❌ CapSolver create error: {data.get('errorDescription', data)}")
+                    return False
+            else:
+                print(f"    ❌ CapSolver create error: {error_desc or data}")
+                return False
+
+        task_id = data["taskId"]
+        print(f"    ⏳ CapSolver: Waiting for solution...")
+
+        for _ in range(60):
+            await asyncio.sleep(2)
+            resp = await client.post(CAPSOLVER_RESULT_URL, json={
+                "clientKey": CAPSOLVER_API_KEY,
+                "taskId": task_id,
+            })
+            result = resp.json()
+
+            if result.get("status") == "ready":
+                token = result["solution"]["gRecaptchaResponse"]
+                await page.evaluate("""(token) => {
+                    // Set the response token
+                    const el = document.querySelector('#g-recaptcha-response');
+                    if (el) el.value = token;
+                    document.querySelectorAll('textarea[name="g-recaptcha-response"]').forEach(
+                        el => el.value = token
+                    );
+                    // Trigger reCAPTCHA callback if registered
+                    if (typeof ___grecaptcha_cfg !== 'undefined') {
+                        const clients = ___grecaptcha_cfg.clients;
+                        if (clients) {
+                            Object.keys(clients).forEach(key => {
+                                const findCallback = (obj, depth) => {
+                                    if (depth > 5 || !obj) return;
+                                    Object.keys(obj).forEach(k => {
+                                        if (typeof obj[k] === 'function') obj[k](token);
+                                        else if (typeof obj[k] === 'object') findCallback(obj[k], depth + 1);
+                                    });
+                                };
+                                findCallback(clients[key], 0);
+                            });
+                        }
+                    }
+                }""", token)
+                print("    ✅ CapSolver: reCAPTCHA solved!")
+                return True
+
+            if result.get("errorId", 0) != 0:
+                print(f"    ❌ CapSolver solve error: {result.get('errorDescription', result)}")
+                return False
+
+        print("    ❌ CapSolver: Timed out waiting for solution")
+        return False
+
+
+async def _solve_with_free(page, allow_reload: bool) -> bool:
+    """Free YOLO+CLIP solver with escalating retries."""
+    print("    🔐 Solving with AI (YOLO + CLIP)...")
 
     for i, cfg in enumerate(_ATTEMPT_CONFIGS):
         attempt_num = i + 1
 
-        # Reload page on attempt 3+ to get a fresh challenge
         if i >= 2 and allow_reload:
-            print(f"    🔄 Reloading page for fresh challenge...")
-            current_url = page.url
+            print("    🔄 Reloading page for fresh challenge...")
             try:
                 await page.reload(timeout=15000)
                 await page.wait_for_timeout(3000)
@@ -69,30 +170,51 @@ async def detect_and_solve(page, allow_reload: bool = True) -> bool:
                     print("    ✅ CAPTCHA gone after reload!")
                     return True
             except Exception:
-                pass  # Reload failed, try solving anyway
+                pass
 
-        # Wait for CAPTCHA to fully render
         await page.wait_for_timeout(cfg["pre_wait"])
 
         try:
-            await _try_solve(page, cfg["click_timeout"])
+            challenger = AsyncChallenger(page, click_timeout=cfg["click_timeout"])
+            await challenger.solve_recaptcha()
             print(f"    ✅ reCAPTCHA solved! (attempt {attempt_num})")
             return True
         except Exception as e:
             err_str = str(e).lower()
             if "no" in err_str and ("found" in err_str or "captcha" in err_str):
-                # No actual CAPTCHA present (false positive from selector)
                 return True
             print(f"    ❌ Attempt {attempt_num}/{len(_ATTEMPT_CONFIGS)} failed: {e}")
-
-            # Brief pause between attempts
             if i < len(_ATTEMPT_CONFIGS) - 1:
                 await asyncio.sleep(2)
 
-    print("    🚫 All CAPTCHA solve attempts exhausted")
+    print("    🚫 All free CAPTCHA solve attempts exhausted")
     return False
 
 
+async def detect_and_solve(page, allow_reload: bool = True) -> bool:
+    """
+    Attempt to solve any reCAPTCHA on the current page.
+
+    If CAPSOLVER_API_KEY is set, goes straight to CapSolver (no free attempts).
+    Otherwise, uses the free YOLO+CLIP solver with escalating retries.
+
+    Returns True if no CAPTCHA or CAPTCHA was solved, False if blocked.
+    """
+    if not await _is_captcha_present(page):
+        return True
+
+    print("    🔐 reCAPTCHA detected!")
+
+    if CAPSOLVER_API_KEY:
+        try:
+            return await _solve_with_capsolver(page)
+        except Exception as e:
+            print(f"    ❌ CapSolver failed: {e}")
+            return False
+    else:
+        return await _solve_with_free(page, allow_reload)
+
+
 def is_configured() -> bool:
-    """Return True — recognizer CAPTCHA solving requires no API keys."""
+    """Return True — free solver needs no keys, CapSolver is optional."""
     return True
