@@ -119,41 +119,58 @@ async def greenhouse_upload_file(page: Page, field_name: str, file_path: str) ->
     Instead, clicking the 'Attach' button creates one dynamically via JS.
     We trigger the click, wait for the hidden input, then set the file.
 
-    Falls back to the 'paste' textarea if file upload doesn't work.
+    Falls back to directly finding/creating a file input if the Attach flow hangs.
     """
     try:
-        # Strategy 1: Click "Attach" to trigger dynamic file input creation
+        # Strategy 1: Find a hidden file input already in the DOM (some Greenhouse forms)
+        file_input = await page.query_selector(
+            f"[data-field='{field_name}'] input[type='file'], "
+            f"input[type='file'][id*='{field_name}'], "
+            f"input[type='file'][name*='{field_name}']"
+        )
+        if file_input:
+            await file_input.set_input_files(file_path)
+            await page.wait_for_timeout(2000)
+            print(f"    📎 Uploaded {field_name} (direct input)")
+            return True
+
+        # Strategy 2: Click "Attach" to trigger dynamic file input creation
         attach_btn = await page.query_selector(
             f"[data-field='{field_name}'] button[data-source='attach']"
         )
         if attach_btn:
-            # Listen for the file input that JS will create
-            async with page.expect_file_chooser(timeout=5000) as fc_info:
-                await attach_btn.click()
-            file_chooser = await fc_info.value
-            await file_chooser.set_files(file_path)
-            await page.wait_for_timeout(2000)
-            # Check if filename appeared (upload success indicator)
-            filename_el = await page.query_selector(f"#{field_name}_filename")
-            if filename_el:
-                name_text = await filename_el.inner_text()
-                if name_text.strip():
-                    print(f"    📎 Uploaded {field_name}: {name_text.strip()}")
+            try:
+                async with page.expect_file_chooser(timeout=5000) as fc_info:
+                    await attach_btn.click()
+                file_chooser = await fc_info.value
+                await file_chooser.set_files(file_path)
+                await page.wait_for_timeout(2000)
+                filename_el = await page.query_selector(f"#{field_name}_filename")
+                if filename_el:
+                    name_text = await filename_el.inner_text()
+                    if name_text.strip():
+                        print(f"    📎 Uploaded {field_name}: {name_text.strip()}")
+                        return True
+            except Exception:
+                # file_chooser flow timed out — try finding the input JS created
+                file_input = await page.query_selector(
+                    f"[data-field='{field_name}'] input[type='file'], "
+                    f"input[type='file'][id*='{field_name}']"
+                )
+                if file_input:
+                    await file_input.set_input_files(file_path)
+                    await page.wait_for_timeout(2000)
+                    print(f"    📎 Uploaded {field_name} (fallback input)")
                     return True
 
-        # Strategy 2: Use the "paste" textarea as fallback
-        paste_btn = await page.query_selector(
-            f"[data-field='{field_name}'] button[data-source='paste']"
-        )
-        if paste_btn and file_path.endswith(('.txt', '.text')):
-            await paste_btn.click()
-            await page.wait_for_timeout(500)
-            textarea = await page.query_selector(f"#{field_name}_text")
-            if textarea:
-                with open(file_path) as f:
-                    text = f.read()
-                await textarea.fill(text)
-                print(f"    📝 Pasted {field_name} text")
+        # Strategy 3: Any remaining file input on the page (last resort for cover letter)
+        if field_name == "cover_letter":
+            all_inputs = await page.query_selector_all("input[type='file']")
+            # The first file input is usually resume; second is cover letter
+            if len(all_inputs) >= 2:
+                await all_inputs[1].set_input_files(file_path)
+                await page.wait_for_timeout(2000)
+                print(f"    📎 Uploaded {field_name} (2nd file input)")
                 return True
 
         print(f"    ⚠️  Could not upload {field_name}")
@@ -289,8 +306,25 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             print(f"  🚫 CAPTCHA blocked before Greenhouse submit")
             return "captcha_blocked"
 
-        # Submit
-        submit_clicked = await safe_click(page, "#submit_app, button[type='submit'], input[type='submit']")
+        # Submit — scroll into view and use JS click as fallback for overlay issues
+        submit_clicked = False
+        for sel in ["#submit_app", "button[type='submit']", "input[type='submit']"]:
+            el = await page.query_selector(sel)
+            if el:
+                try:
+                    await el.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(500)
+                    await el.click(timeout=5000)
+                    submit_clicked = True
+                    break
+                except Exception:
+                    # "subtree intercepts pointer events" — use JS click
+                    try:
+                        await el.evaluate("el => el.click()")
+                        submit_clicked = True
+                        break
+                    except Exception:
+                        continue
         if not submit_clicked:
             print(f"  ⚠️  Could not find submit button")
             return False
