@@ -1,107 +1,58 @@
 """
-CAPTCHA Solver — Botright-powered free CAPTCHA solving for ATS forms.
+CAPTCHA Solver — Free reCAPTCHA solving using the recognizer library.
 
-Uses Botright's built-in AI models (YOLO + CLIP for reCAPTCHA, hcaptcha-challenger
-for hCaptcha) to solve CAPTCHAs without any paid API keys.
+Uses YOLO + CLIP AI models to solve reCAPTCHA v2 image challenges locally.
+No paid API keys required — all solving runs on-device.
 
 Supports:
   - reCAPTCHA v2 (image classification via YOLO/CLIP)
-  - hCaptcha (via hcaptcha-challenger)
-  - GeeTest v3/v4 (slider + image)
-
-No API keys required — all solving runs locally.
 """
+
+from recognizer.agents.playwright import AsyncChallenger
 
 
 async def detect_and_solve(page) -> bool:
     """
-    Attempt to solve any CAPTCHA on the current page using Botright's built-in solvers.
+    Attempt to solve any reCAPTCHA on the current page.
 
-    Botright pages have solve_recaptcha() and solve_hcaptcha() methods.
-    Falls back gracefully if no CAPTCHA is present or solving fails.
+    Uses the recognizer library's AsyncChallenger which handles detection,
+    clicking the checkbox, solving image challenges, and submitting.
 
     Returns True if no CAPTCHA or CAPTCHA was solved, False if blocked.
     """
-    # Only Botright pages have these methods — regular Playwright pages don't
-    if not hasattr(page, "solve_recaptcha"):
+    # Check if there's a reCAPTCHA on the page
+    recaptcha_el = await page.query_selector(
+        ".g-recaptcha, [data-sitekey], iframe[src*='recaptcha']"
+    )
+    if not recaptcha_el:
+        return True  # No CAPTCHA — all clear
+
+    print("    🔐 reCAPTCHA detected — solving with AI (YOLO + CLIP)...")
+
+    try:
+        challenger = AsyncChallenger(page, click_timeout=1000)
+        await challenger.solve_recaptcha()
+        print("    ✅ reCAPTCHA solved!")
         return True
-
-    # Try reCAPTCHA first (most common on Greenhouse/Lever)
-    try:
-        recaptcha_el = await page.query_selector(
-            ".g-recaptcha, [data-sitekey], iframe[src*='recaptcha']"
-        )
-        if recaptcha_el:
-            print("    🔐 reCAPTCHA detected — solving with Botright AI...")
-            result = await page.solve_recaptcha()
-            if result:
-                print("    ✅ reCAPTCHA solved!")
-                return True
-            else:
-                print("    ⚠️  reCAPTCHA solve returned falsy — retrying...")
-                # One retry
-                result = await page.solve_recaptcha()
-                if result:
-                    print("    ✅ reCAPTCHA solved on retry!")
-                    return True
-                print("    ❌ reCAPTCHA solve failed")
-                return False
-    except Exception as e:
-        err_str = str(e).lower()
-        # "no recaptcha found" is not an error — just means no CAPTCHA on page
-        if "no" in err_str and ("found" in err_str or "captcha" in err_str):
-            pass
-        else:
-            print(f"    ⚠️  reCAPTCHA solver error: {e}")
-
-    # Try hCaptcha
-    try:
-        hcaptcha_el = await page.query_selector(
-            ".h-captcha, [data-hcaptcha-sitekey], iframe[src*='hcaptcha']"
-        )
-        if hcaptcha_el:
-            print("    🔐 hCaptcha detected — solving with Botright AI...")
-            result = await page.solve_hcaptcha()
-            if result:
-                print("    ✅ hCaptcha solved!")
-                return True
-            else:
-                print("    ❌ hCaptcha solve failed")
-                return False
     except Exception as e:
         err_str = str(e).lower()
         if "no" in err_str and ("found" in err_str or "captcha" in err_str):
-            pass
-        else:
-            print(f"    ⚠️  hCaptcha solver error: {e}")
+            # No actual CAPTCHA present (false positive from selector)
+            return True
+        print(f"    ❌ reCAPTCHA solve failed: {e}")
 
-    # Try GeeTest
-    try:
-        geetest_el = await page.query_selector(
-            ".geetest_holder, .geetest_widget, [data-gt]"
-        )
-        if geetest_el:
-            print("    🔐 GeeTest detected — solving with Botright AI...")
-            result = await page.solve_geetest()
-            if result:
-                print("    ✅ GeeTest solved!")
-                return True
-            else:
-                print("    ❌ GeeTest solve failed")
-                return False
-    except Exception as e:
-        err_str = str(e).lower()
-        if "not implemented" in err_str:
-            print("    ⚠️  GeeTest solver not available in this Botright version")
-        elif "no" in err_str and "found" in err_str:
-            pass
-        else:
-            print(f"    ⚠️  GeeTest solver error: {e}")
-
-    # No CAPTCHA found — all clear
-    return True
+        # One retry
+        try:
+            print("    🔄 Retrying...")
+            challenger = AsyncChallenger(page, click_timeout=1500)
+            await challenger.solve_recaptcha()
+            print("    ✅ reCAPTCHA solved on retry!")
+            return True
+        except Exception as e2:
+            print(f"    ❌ Retry failed: {e2}")
+            return False
 
 
 def is_configured() -> bool:
-    """Return True — Botright CAPTCHA solving requires no API keys."""
+    """Return True — recognizer CAPTCHA solving requires no API keys."""
     return True

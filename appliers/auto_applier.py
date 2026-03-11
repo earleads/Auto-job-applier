@@ -1,12 +1,13 @@
 """
-Auto-Applier — Botright-based form submission for multiple ATS platforms.
+Auto-Applier — Patchright-based form submission for multiple ATS platforms.
 
 Supports:
   - LinkedIn Easy Apply
   - Greenhouse (boards.greenhouse.io) — with free AI CAPTCHA solving
   - Lever (jobs.lever.co) — with free AI CAPTCHA solving
 
-Uses Botright (built on Playwright) for stealth browsing and free CAPTCHA solving.
+Uses Patchright (stealth Playwright fork) for anti-detection browsing and
+the recognizer library (YOLO + CLIP) for free reCAPTCHA solving.
 No paid API keys required.
 """
 
@@ -14,16 +15,11 @@ import asyncio
 import os
 from pathlib import Path
 
-import botright
-
-from typing import Any
+from patchright.async_api import async_playwright, Page
 
 from config import CANDIDATE_PROFILE, ANTHROPIC_API_KEY
 import anthropic
 from appliers.captcha_solver import detect_and_solve, is_configured as captcha_configured
-
-# Botright pages are duck-type compatible with Playwright's Page
-Page = Any
 
 # Extract contact info from profile for form filling
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -501,7 +497,13 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
 
 async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser) -> bool | str:
     """Route application to correct ATS handler."""
-    page = await browser.new_page()
+    context = await browser.new_context(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+        )
+    )
+    page = await context.new_page()
     ats = job.get("ats_type", "other")
 
     # For LinkedIn-sourced jobs with external apply URLs, use the external URL
@@ -525,7 +527,7 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser)
             print(f"  ⏭️  Unknown ATS type '{ats}' — skipping auto-apply")
             success = False
     finally:
-        await page.close()
+        await context.close()
 
     return success
 
@@ -541,9 +543,11 @@ async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
         return []
 
     results = []
-    botright_client = await botright.Botright(headless=True)
-    try:
-        browser = await botright_client.new_browser()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        )
         for item in jobs_with_docs:
             success = await apply_to_job(
                 item["job"],
@@ -553,7 +557,7 @@ async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
             )
             results.append(success)
             await asyncio.sleep(5)  # Rate limiting between applications
-    finally:
-        await botright_client.close()
+
+        await browser.close()
 
     return results

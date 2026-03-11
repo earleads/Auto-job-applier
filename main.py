@@ -104,7 +104,7 @@ async def run_pipeline():
 
     print(f"\n{'='*54}")
     print(f"🚀 Pipeline started at {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
-    print("🔐 CAPTCHA solver: ENABLED (Botright AI — free, no API key needed)")
+    print("🔐 CAPTCHA solver: ENABLED (Patchright + recognizer AI — free, no API key needed)")
     if TEST_MODE:
         print("🧪 TEST MODE — 1 LinkedIn query, up to 5 jobs, skip detail fetch")
         report.append("Mode: TEST")
