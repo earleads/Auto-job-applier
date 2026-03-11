@@ -5,6 +5,7 @@ Supports:
   - LinkedIn Easy Apply
   - Greenhouse (boards.greenhouse.io) — with free AI CAPTCHA solving
   - Lever (jobs.lever.co) — with free AI CAPTCHA solving
+  - Generic ATS (Workday, iCIMS, Ashby, Jobvite, SmartRecruiters, etc.)
 
 Uses Patchright (stealth Playwright fork) for anti-detection browsing and
 the recognizer library (YOLO + CLIP) for free reCAPTCHA solving.
@@ -13,6 +14,8 @@ No paid API keys required.
 
 import asyncio
 import os
+import re
+from datetime import datetime
 from pathlib import Path
 
 from patchright.async_api import async_playwright, Page
@@ -90,6 +93,31 @@ Output ONLY the answer (or SKIP), nothing else.
         print(f"    ⏭️  AI declined field: {label[:50]}")
         return None
     return answer
+
+
+# ── Screenshot helper ─────────────────────────────────────────────────────────
+
+SCREENSHOTS_DIR = Path("screenshots")
+SCREENSHOTS_DIR.mkdir(exist_ok=True)
+
+
+async def capture_screenshot(page: Page, job: dict, status: str) -> str | None:
+    """Capture a screenshot after an application attempt.
+
+    Returns the screenshot file path, or None on failure.
+    """
+    try:
+        title = re.sub(r'[^\w\s-]', '', job.get('title', 'unknown'))[:50].strip()
+        company = re.sub(r'[^\w\s-]', '', job.get('company', 'unknown'))[:30].strip()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{ts}_{company}_{title}_{status}.png".replace(" ", "_")
+        path = SCREENSHOTS_DIR / filename
+        await page.screenshot(path=str(path), full_page=True)
+        print(f"  📸 Screenshot saved: {path}")
+        return str(path)
+    except Exception as e:
+        print(f"  ⚠️  Screenshot failed: {e}")
+        return None
 
 
 # ── Generic helpers ────────────────────────────────────────────────────────────
@@ -352,13 +380,16 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         form_gone = not await page.query_selector("#submit_app")
 
         if content_success or url_success:
+            await capture_screenshot(page, job, "success")
             print(f"  ✅ Greenhouse application submitted!")
             return True
         elif form_gone:
             # Form disappeared after submit — likely success even without keywords
+            await capture_screenshot(page, job, "success")
             print(f"  ✅ Greenhouse application submitted (form cleared)!")
             return True
         else:
+            await capture_screenshot(page, job, "failed")
             # Check for validation errors
             error_el = await page.query_selector(".field-error, .error-message, #error_explanation")
             if error_el:
@@ -439,8 +470,10 @@ async def apply_lever(page: Page, job: dict, cv_path: str, cover_letter_path: st
 
         content = await page.content()
         if any(kw in content.lower() for kw in ["thank you", "application received", "successfully"]):
+            await capture_screenshot(page, job, "success")
             print(f"  ✅ Lever application submitted!")
             return True
+        await capture_screenshot(page, job, "failed")
         return False
 
     except Exception as e:
@@ -549,7 +582,214 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
         return False
 
 
+# ── Generic ATS Applier ───────────────────────────────────────────────────────
+
+async def apply_generic(page: Page, job: dict, cv_path: str, cover_letter_path: str) -> bool:
+    """
+    Generic applier for any ATS platform (Workday, iCIMS, Ashby, etc.).
+
+    Strategy:
+    1. Navigate to the apply URL
+    2. Look for common "Apply" buttons to reach the application form
+    3. Fill standard fields (name, email, phone, LinkedIn)
+    4. Upload resume
+    5. Use AI to handle custom fields
+    6. Submit
+    """
+    ats = job.get("ats_type", "generic")
+    print(f"  🌐 Generic apply ({ats}): {job['url'][:80]}")
+    try:
+        await page.goto(job["url"], timeout=30000)
+        await page.wait_for_timeout(3000)
+
+        # Solve CAPTCHA if present on initial page load
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked on {ats} page load")
+            return "captcha_blocked"
+
+        # Step 1: Find and click "Apply" button (many ATS show job details first)
+        apply_btn = await page.query_selector(
+            "a[href*='apply'], "
+            "button:has-text('Apply'), "
+            "a:has-text('Apply Now'), "
+            "a:has-text('Apply for this job'), "
+            "button:has-text('Apply Now'), "
+            "[data-automation-id='jobPostingApplyButton'], "  # Workday
+            ".btn-apply, .apply-btn, .apply-button, "
+            "#apply-button, #applyButton"
+        )
+        if apply_btn:
+            try:
+                await apply_btn.click(timeout=5000)
+                await page.wait_for_timeout(3000)
+            except Exception:
+                # Try JS click if intercepted
+                try:
+                    await apply_btn.evaluate("el => el.click()")
+                    await page.wait_for_timeout(3000)
+                except Exception:
+                    pass
+
+        # Step 2: Fill standard form fields using common name/id/placeholder patterns
+        FIELD_MAP = {
+            "name":       (APPLICANT["name"],       ["input[name*='name' i]:not([name*='last']):not([name*='first'])", "input[autocomplete='name']"]),
+            "first_name": (APPLICANT["first_name"], ["input[name*='first' i]", "input[name*='fname' i]", "input[autocomplete='given-name']", "input[id*='firstName' i]", "[data-automation-id='legalNameSection_firstName'] input"]),
+            "last_name":  (APPLICANT["last_name"],  ["input[name*='last' i]", "input[name*='lname' i]", "input[autocomplete='family-name']", "input[id*='lastName' i]", "[data-automation-id='legalNameSection_lastName'] input"]),
+            "email":      (APPLICANT["email"],      ["input[type='email']", "input[name*='email' i]", "input[autocomplete='email']", "input[id*='email' i]"]),
+            "phone":      (APPLICANT["phone"],      ["input[type='tel']", "input[name*='phone' i]", "input[autocomplete='tel']", "input[id*='phone' i]"]),
+            "linkedin":   (APPLICANT["linkedin"],   ["input[name*='linkedin' i]", "input[id*='linkedin' i]", "input[placeholder*='linkedin' i]"]),
+        }
+
+        filled_count = 0
+        for field_name, (value, selectors) in FIELD_MAP.items():
+            if not value:
+                continue
+            for sel in selectors:
+                try:
+                    el = await page.query_selector(sel)
+                    if el:
+                        current = await el.input_value()
+                        if not current:
+                            await el.fill(value)
+                            filled_count += 1
+                            break
+                except Exception:
+                    continue
+
+        if filled_count == 0:
+            print(f"  ⚠️  Could not fill any standard fields — form layout unrecognized")
+            return False
+
+        print(f"    📝 Filled {filled_count} standard fields")
+
+        # Step 3: Upload resume
+        file_input = await page.query_selector("input[type='file']")
+        if file_input:
+            await file_input.set_input_files(cv_path)
+            await page.wait_for_timeout(2000)
+            print(f"    📎 Resume uploaded")
+
+        # Step 4: Handle custom fields with AI
+        # Look for unfilled text inputs with labels
+        all_fields = await page.query_selector_all("label")
+        for label_el in all_fields:
+            try:
+                label = (await label_el.inner_text()).strip()
+                if not label or len(label) > 200:
+                    continue
+                label_lower = label.lower()
+
+                # Skip standard and sensitive fields
+                SKIP_PATTERNS = [
+                    "first name", "last name", "email", "phone", "resume",
+                    "cover letter", "attach", "upload", "captcha", "password",
+                    "ssn", "social security", "eeoc", "gender", "race",
+                    "ethnicity", "veteran", "disability", "i-9", "w-4",
+                    "linkedin",
+                ]
+                if any(p in label_lower for p in SKIP_PATTERNS):
+                    continue
+
+                # Find the associated input
+                label_for = await label_el.get_attribute("for")
+                if label_for:
+                    input_el = await page.query_selector(f"#{label_for}")
+                else:
+                    # Try sibling/child input
+                    parent = await label_el.evaluate_handle("el => el.closest('.field, .form-group, .form-field, [class*=field]') || el.parentElement")
+                    input_el = await parent.as_element().query_selector("input[type='text'], textarea, select") if parent else None
+
+                if not input_el:
+                    continue
+
+                tag = await input_el.evaluate("el => el.tagName.toLowerCase()")
+                if tag == "select":
+                    options_text = await input_el.inner_text()
+                    option_list = [o.strip() for o in options_text.split("\n") if o.strip()]
+                    if option_list:
+                        answer = await ai_fill_field(label, option_list)
+                        if answer:
+                            try:
+                                await input_el.select_option(label=answer)
+                            except Exception:
+                                pass
+                else:
+                    current = await input_el.input_value()
+                    if not current:
+                        answer = await ai_fill_field(label)
+                        if answer:
+                            try:
+                                await input_el.fill(answer)
+                            except Exception:
+                                pass
+            except Exception:
+                continue
+
+        # Step 5: Solve CAPTCHA before submit
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked before {ats} submit")
+            return "captcha_blocked"
+
+        # Step 6: Submit
+        submit_btn = await page.query_selector(
+            "button[type='submit'], "
+            "input[type='submit'], "
+            "button:has-text('Submit'), "
+            "button:has-text('Submit Application'), "
+            "button:has-text('Apply'), "
+            "[data-automation-id='bottom-navigation-next-button']"  # Workday
+        )
+        if submit_btn:
+            try:
+                await submit_btn.scroll_into_view_if_needed()
+                await page.wait_for_timeout(500)
+                await submit_btn.click(timeout=5000)
+            except Exception:
+                try:
+                    await submit_btn.evaluate("el => el.click()")
+                except Exception:
+                    print(f"  ⚠️  Could not click submit button")
+                    return False
+        else:
+            print(f"  ⚠️  No submit button found")
+            return False
+
+        await page.wait_for_timeout(5000)
+
+        # Post-submit CAPTCHA
+        captcha_ok = await detect_and_solve(page)
+
+        # Check for success
+        content = (await page.content()).lower()
+        current_url = page.url.lower()
+        SUCCESS_KEYWORDS = [
+            "thank you", "thanks for", "submitted", "application received",
+            "application has been", "we have received", "successfully applied",
+            "confirmation", "we'll be in touch", "we will review",
+        ]
+        url_success = any(kw in current_url for kw in ["thank", "confirm", "success"])
+        content_success = any(kw in content for kw in SUCCESS_KEYWORDS)
+
+        if content_success or url_success:
+            await capture_screenshot(page, job, "success")
+            print(f"  ✅ {ats.title()} application submitted!")
+            return True
+        else:
+            await capture_screenshot(page, job, "unclear")
+            print(f"  ⚠️  {ats.title()} submit confirmation unclear — check manually")
+            return False
+
+    except Exception as e:
+        print(f"  ❌ Generic apply failed ({ats}): {e}")
+        return False
+
+
 # ── Router ─────────────────────────────────────────────────────────────────────
+
+# ATS types that can be handled by the generic applier
+GENERIC_ATS_TYPES = {"workday", "icims", "ultipro", "jobvite", "ashby", "smartrecruiters", "generic"}
 
 async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser) -> bool | str:
     """Route application to correct ATS handler."""
@@ -575,9 +815,11 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser)
             success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "lever":
             success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
+        elif ats in GENERIC_ATS_TYPES:
+            success = await apply_generic(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "linkedin":
             # No LinkedIn Easy Apply — skip jobs without external apply links
-            print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
+            print(f"  ⏭️  LinkedIn Easy Apply not supported — no external link found for {job['title']}")
             success = False
         else:
             print(f"  ⏭️  Unknown ATS type '{ats}' — skipping auto-apply")

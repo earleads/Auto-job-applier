@@ -200,14 +200,25 @@ def make_id(url: str) -> str:
 
 
 def detect_ats(url: str) -> Optional[str]:
-    if "greenhouse.io" in url or "grnh.se" in url:
+    url_lower = url.lower()
+    if "greenhouse.io" in url_lower or "grnh.se" in url_lower:
         return "greenhouse"
-    if "lever.co" in url:
+    if "lever.co" in url_lower or "jobs.lever.co" in url_lower:
         return "lever"
-    if "linkedin.com" in url:
+    if "linkedin.com" in url_lower:
         return "linkedin"
-    if "workday" in url:
+    if "myworkday" in url_lower or "workday.com" in url_lower or "wd5.myworkdayjobs" in url_lower:
         return "workday"
+    if "icims.com" in url_lower:
+        return "icims"
+    if "ultipro.com" in url_lower or "recruiting.ultipro" in url_lower:
+        return "ultipro"
+    if "jobvite.com" in url_lower:
+        return "jobvite"
+    if "ashbyhq.com" in url_lower:
+        return "ashby"
+    if "smartrecruiters.com" in url_lower:
+        return "smartrecruiters"
     return "other"
 
 
@@ -267,6 +278,35 @@ async def scrape_linkedin(page: Page, query: str, location: str, first_run: bool
     return jobs
 
 
+async def _resolve_redirect(url: str, max_hops: int = 5) -> Optional[str]:
+    """Follow redirect chains (HTTP 3xx) to find the final destination URL.
+
+    LinkedIn often wraps external apply links in its own redirect:
+      https://www.linkedin.com/redir/redirect?url=https%3A%2F%2F...
+    This follows the chain to discover the real ATS URL.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+            current = url
+            for _ in range(max_hops):
+                r = await client.head(current, follow_redirects=False)
+                if r.status_code in (301, 302, 303, 307, 308):
+                    location = r.headers.get("location", "")
+                    if not location:
+                        break
+                    # Handle relative redirects
+                    if location.startswith("/"):
+                        from urllib.parse import urlparse
+                        parsed = urlparse(current)
+                        location = f"{parsed.scheme}://{parsed.netloc}{location}"
+                    current = location
+                else:
+                    break
+            return current if current != url else None
+    except Exception:
+        return None
+
+
 async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
     """
     Fetch full JD from LinkedIn job page AND extract external apply URL.
@@ -314,24 +354,51 @@ async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
 
         # Look for external apply link (not Easy Apply)
         # LinkedIn shows "Apply" button that links to the company's ATS
+        # Broadened selectors to catch more ATS platforms and link patterns
         apply_link = await page.query_selector(
-            "a.apply-button[href*='greenhouse'], "
-            "a.apply-button[href*='lever.co'], "
+            # ATS-specific href patterns
             "a[href*='boards.greenhouse.io'], "
+            "a[href*='grnh.se'], "
             "a[href*='jobs.lever.co'], "
+            "a[href*='myworkday'], "
+            "a[href*='workday.com'], "
+            "a[href*='icims.com'], "
+            "a[href*='jobvite.com'], "
+            "a[href*='ashbyhq.com'], "
+            "a[href*='smartrecruiters.com'], "
+            "a[href*='ultipro.com'], "
+            # LinkedIn's offsite apply button classes (catches any external link)
             "a.apply-button--offsite, "
             ".apply-button--offsite a, "
-            "a[data-tracking-control-name='public_jobs_apply-link-offsite']"
+            "a[data-tracking-control-name='public_jobs_apply-link-offsite'], "
+            "a[data-tracking-control-name='public_jobs_apply-link-offsite_sign-up-modal'], "
+            # Generic apply button patterns
+            "a.apply-button[href]:not([href*='linkedin.com']), "
+            ".top-card-layout__cta-container a[href]:not([href*='linkedin.com'])"
         )
         if apply_link:
             external_url = await apply_link.get_attribute("href")
-            if external_url:
-                external_url = external_url.split("?")[0] if "linkedin.com" not in external_url else external_url
+            if external_url and "linkedin.com" not in external_url:
+                # Keep query params for ATS URLs (they often contain job tokens)
                 ats_type = detect_ats(external_url)
-                if ats_type in ("greenhouse", "lever"):
+                if ats_type != "other":
                     print(f"    🔗 External apply link found: {ats_type}")
                     job["apply_url"] = external_url
                     job["ats_type"] = ats_type
+                else:
+                    # Unknown ATS but still an external link — store it
+                    print(f"    🔗 External apply link found: {external_url[:80]}")
+                    job["apply_url"] = external_url
+                    job["ats_type"] = "generic"
+            elif external_url and "linkedin.com" in external_url:
+                # LinkedIn redirect URL — follow it to find the actual ATS
+                resolved_url = await _resolve_redirect(external_url)
+                if resolved_url and "linkedin.com" not in resolved_url:
+                    ats_type = detect_ats(resolved_url)
+                    label = ats_type if ats_type != "other" else "generic"
+                    print(f"    🔗 Resolved redirect → {label}: {resolved_url[:80]}")
+                    job["apply_url"] = resolved_url
+                    job["ats_type"] = ats_type if ats_type != "other" else "generic"
 
     except Exception as e:
         print(f"    ⚠️  Job detail fetch failed: {e}")
