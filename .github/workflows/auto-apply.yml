@@ -36,8 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          playwright install chromium
-          playwright install-deps
+          patchright install chromium
 
       - name: Restore previous run data
         uses: dawidd6/action-download-artifact@v6
@@ -53,6 +52,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
         run: |
           MODE="${{ inputs.mode }}"
