@@ -251,7 +251,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
 
             # Skip fields we can't/shouldn't fill
             SKIP_FIELDS = [
-                "security", "captcha", "verification", "verify",
+                "captcha", "verification", "verify",
                 "password", "ssn", "social security", "eeoc",
                 "gender", "race", "ethnicity", "veteran", "disability",
                 "i-9", "w-4", "authorization code",
@@ -337,13 +337,35 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             print(f"  🚫 CAPTCHA blocked after Greenhouse submit click")
             return "captcha_blocked"
 
-        # Check for success
-        content = await page.content()
-        if any(kw in content.lower() for kw in ["thank you", "submitted", "application received", "application has been"]):
+        # Check for success — Greenhouse shows various confirmation messages
+        content = (await page.content()).lower()
+        current_url = page.url.lower()
+        SUCCESS_KEYWORDS = [
+            "thank you", "thanks for", "submitted", "application received",
+            "application has been", "we have received", "successfully applied",
+            "confirmation", "we'll be in touch", "we will review",
+        ]
+        # URL-based detection: Greenhouse redirects to a thank-you page
+        url_success = any(kw in current_url for kw in ["thank", "confirm", "success"])
+        content_success = any(kw in content for kw in SUCCESS_KEYWORDS)
+        # Also check if the form itself is gone (replaced by confirmation)
+        form_gone = not await page.query_selector("#submit_app")
+
+        if content_success or url_success:
             print(f"  ✅ Greenhouse application submitted!")
             return True
+        elif form_gone:
+            # Form disappeared after submit — likely success even without keywords
+            print(f"  ✅ Greenhouse application submitted (form cleared)!")
+            return True
         else:
-            print(f"  ⚠️  Submit confirmation unclear — check manually")
+            # Check for validation errors
+            error_el = await page.query_selector(".field-error, .error-message, #error_explanation")
+            if error_el:
+                error_text = await error_el.inner_text()
+                print(f"  ❌ Greenhouse validation error: {error_text[:200]}")
+            else:
+                print(f"  ⚠️  Submit confirmation unclear — check manually")
             return False
 
     except Exception as e:
