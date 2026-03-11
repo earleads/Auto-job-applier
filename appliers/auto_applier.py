@@ -252,8 +252,21 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         await safe_fill(page, "input[name*='linkedin']", APPLICANT["linkedin"])
         await safe_fill(page, "input[autocomplete='url']", APPLICANT["linkedin"])
 
-        # Location (if asked)
-        await safe_fill(page, "#job_application_location", APPLICANT["location"])
+        # Location (if asked) — Greenhouse uses autocomplete dropdown
+        loc_input = await page.query_selector("#job_application_location")
+        if loc_input:
+            await loc_input.fill("")
+            await loc_input.type(APPLICANT["location"].split("(")[0].strip(), delay=50)
+            await page.wait_for_timeout(1500)
+            # Select first autocomplete suggestion if dropdown appears
+            suggestion = await page.query_selector(
+                ".autocomplete-results li, .location-autocomplete li, "
+                "[class*='autocomplete'] li, [role='option'], "
+                ".ui-menu-item, [class*='suggestion']"
+            )
+            if suggestion:
+                await suggestion.click()
+                await page.wait_for_timeout(500)
 
         # Resume upload — Greenhouse uses JS-based S3 upload, not <input type="file">
         await greenhouse_upload_file(page, "resume", cv_path)
@@ -307,6 +320,30 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                             await select_el.select_option(label=answer)
                         except Exception:
                             pass
+                continue
+
+            # Checkboxes — e.g. "Select the countries you anticipate working in"
+            checkboxes = await field.query_selector_all("input[type='checkbox']")
+            if checkboxes:
+                # Get all checkbox labels and ask AI which to select
+                checkbox_options = []
+                for cb in checkboxes:
+                    cb_label = await cb.evaluate(
+                        "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                    )
+                    if cb_label.strip():
+                        checkbox_options.append(cb_label.strip())
+                if checkbox_options:
+                    answer = await ai_fill_field(label, checkbox_options)
+                    if answer:
+                        # AI may return one or comma-separated values
+                        selections = [s.strip() for s in answer.split(",")]
+                        for cb in checkboxes:
+                            cb_label = await cb.evaluate(
+                                "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                            )
+                            if cb_label.strip() in selections:
+                                await cb.click()
                 continue
 
             # Text inputs (skip hidden inputs, textareas for paste, etc.)
@@ -379,24 +416,53 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         # Also check if the form itself is gone (replaced by confirmation)
         form_gone = not await page.query_selector("#submit_app")
 
-        if content_success or url_success:
+        # Check for validation errors FIRST — they take priority over form_gone
+        error_els = await page.query_selector_all(
+            ".field-error, .error-message, #error_explanation, "
+            "[class*='error'], .invalid-feedback, [aria-invalid='true']"
+        )
+        has_errors = False
+        for error_el in error_els:
+            error_text = (await error_el.inner_text()).strip()
+            if error_text:
+                has_errors = True
+                print(f"  ❌ Greenhouse validation error: {error_text[:200]}")
+                break
+
+        # Also check for required fields that are still empty
+        if not has_errors:
+            required_inputs = await page.query_selector_all(
+                "input[required], select[required], textarea[required]"
+            )
+            for inp in required_inputs:
+                tag = await inp.evaluate("el => el.tagName.toLowerCase()")
+                if tag == "select":
+                    val = await inp.evaluate("el => el.value")
+                else:
+                    val = await inp.input_value()
+                if not val or not val.strip():
+                    label_text = await inp.evaluate(
+                        "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.placeholder || el.name || 'unknown')"
+                    )
+                    has_errors = True
+                    print(f"  ❌ Required field still empty: {label_text}")
+                    break
+
+        if has_errors:
+            await capture_screenshot(page, job, "failed")
+            return False
+        elif content_success or url_success:
             await capture_screenshot(page, job, "success")
             print(f"  ✅ Greenhouse application submitted!")
             return True
         elif form_gone:
-            # Form disappeared after submit — likely success even without keywords
+            # Form disappeared after submit with no errors — likely success
             await capture_screenshot(page, job, "success")
             print(f"  ✅ Greenhouse application submitted (form cleared)!")
             return True
         else:
             await capture_screenshot(page, job, "failed")
-            # Check for validation errors
-            error_el = await page.query_selector(".field-error, .error-message, #error_explanation")
-            if error_el:
-                error_text = await error_el.inner_text()
-                print(f"  ❌ Greenhouse validation error: {error_text[:200]}")
-            else:
-                print(f"  ⚠️  Submit confirmation unclear — check manually")
+            print(f"  ⚠️  Submit confirmation unclear — check manually")
             return False
 
     except Exception as e:
@@ -760,6 +826,23 @@ async def apply_generic(page: Page, job: dict, cv_path: str, cover_letter_path: 
 
         # Post-submit CAPTCHA
         captcha_ok = await detect_and_solve(page)
+
+        # Check for validation errors first
+        error_els = await page.query_selector_all(
+            ".field-error, .error-message, #error_explanation, "
+            "[class*='error'], .invalid-feedback, [aria-invalid='true']"
+        )
+        has_errors = False
+        for error_el in error_els:
+            error_text = (await error_el.inner_text()).strip()
+            if error_text:
+                has_errors = True
+                print(f"  ❌ Validation error: {error_text[:200]}")
+                break
+
+        if has_errors:
+            await capture_screenshot(page, job, "failed")
+            return False
 
         # Check for success
         content = (await page.content()).lower()

@@ -15,6 +15,7 @@ CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "")  # Optional: enables CAPT
 CANDIDATE_PROFILE = """
 Name: Joe Allen
 Email: joespehallen90@gmail.com
+Phone: +1 678-555-0142
 LinkedIn: linkedin.com/in/joe-allen-264a53366
 Location: New York, NY (open to remote / hybrid / relocation)
 
