@@ -1,24 +1,29 @@
 """
-Auto-Applier — Playwright-based form submission for multiple ATS platforms.
+Auto-Applier — Botright-based form submission for multiple ATS platforms.
 
 Supports:
   - LinkedIn Easy Apply
-  - Greenhouse (boards.greenhouse.io) — with CapSolver CAPTCHA solving
-  - Lever (jobs.lever.co) — with CapSolver CAPTCHA solving
+  - Greenhouse (boards.greenhouse.io) — with free AI CAPTCHA solving
+  - Lever (jobs.lever.co) — with free AI CAPTCHA solving
 
-CAPTCHA solving requires CAPSOLVER_API_KEY in .env (optional).
-Without it, CAPTCHA-protected applications are marked as captcha_blocked.
+Uses Botright (built on Playwright) for stealth browsing and free CAPTCHA solving.
+No paid API keys required.
 """
 
 import asyncio
 import os
 from pathlib import Path
 
-from playwright.async_api import async_playwright, Page, Browser
+import botright
+
+from typing import Any
 
 from config import CANDIDATE_PROFILE, ANTHROPIC_API_KEY
 import anthropic
 from appliers.captcha_solver import detect_and_solve, is_configured as captcha_configured
+
+# Botright pages are duck-type compatible with Playwright's Page
+Page = Any
 
 # Extract contact info from profile for form filling
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -494,16 +499,9 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
 
 # ── Router ─────────────────────────────────────────────────────────────────────
 
-async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool | str:
+async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser) -> bool | str:
     """Route application to correct ATS handler."""
-    context = await browser.new_context(
-        user_agent=(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
-        )
-    )
-
-    page = await context.new_page()
+    page = await browser.new_page()
     ats = job.get("ats_type", "other")
 
     # For LinkedIn-sourced jobs with external apply URLs, use the external URL
@@ -516,17 +514,9 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             print(f"  ⏭️  Skipping {job.get('title', '?')} — no valid apply URL")
             success = False
         elif ats == "greenhouse":
-            if captcha_configured():
-                success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
-            else:
-                print(f"  🚫 Greenhouse has reCAPTCHA — set CAPSOLVER_API_KEY to enable: {job.get('title', '?')}")
-                success = "captcha_blocked"
+            success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "lever":
-            if captcha_configured():
-                success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
-            else:
-                print(f"  🚫 Lever has CAPTCHA — set CAPSOLVER_API_KEY to enable: {job.get('title', '?')}")
-                success = "captcha_blocked"
+            success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "linkedin":
             # No LinkedIn Easy Apply — skip jobs without external apply links
             print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
@@ -535,7 +525,7 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             print(f"  ⏭️  Unknown ATS type '{ats}' — skipping auto-apply")
             success = False
     finally:
-        await context.close()
+        await page.close()
 
     return success
 
@@ -543,16 +533,17 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
 async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
     """
     Apply to all qualified jobs. Returns list of True/False/"captcha_blocked" per job.
+
+    Uses Botright for stealth browsing and free AI-powered CAPTCHA solving.
+    No API keys required — all CAPTCHA solving runs locally.
     """
     if not jobs_with_docs:
         return []
 
     results = []
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox"]
-        )
+    botright_client = await botright.Botright(headless=True)
+    try:
+        browser = await botright_client.new_browser()
         for item in jobs_with_docs:
             success = await apply_to_job(
                 item["job"],
@@ -562,7 +553,7 @@ async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
             )
             results.append(success)
             await asyncio.sleep(5)  # Rate limiting between applications
-
-        await browser.close()
+    finally:
+        await botright_client.close()
 
     return results

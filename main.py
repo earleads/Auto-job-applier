@@ -29,7 +29,6 @@ from database import (
 from scrapers.scraper import run_scrapers
 from generators.ai_generator import process_job
 from appliers.auto_applier import run_applications
-from appliers.captcha_solver import is_configured as captcha_configured
 
 
 def check_api_key():
@@ -105,10 +104,7 @@ async def run_pipeline():
 
     print(f"\n{'='*54}")
     print(f"🚀 Pipeline started at {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
-    if captcha_configured():
-        print("🔐 CAPTCHA solver: ENABLED (CapSolver) — Greenhouse/Lever auto-apply active")
-    else:
-        print("🔐 CAPTCHA solver: DISABLED — set CAPSOLVER_API_KEY to enable Greenhouse/Lever")
+    print("🔐 CAPTCHA solver: ENABLED (Botright AI — free, no API key needed)")
     if TEST_MODE:
         print("🧪 TEST MODE — 1 LinkedIn query, up to 5 jobs, skip detail fetch")
         report.append("Mode: TEST")
@@ -143,16 +139,7 @@ async def run_pipeline():
     scores = []
     scoring_errors = 0
 
-    captcha_blocked_count = 0
-    has_captcha_solver = captcha_configured()
     for job in new_jobs:
-        ats = job.get("ats_type", "")
-        # Only skip Greenhouse/Lever if no CAPTCHA solver is configured
-        if ats in ("greenhouse", "lever") and not has_captcha_solver:
-            update_job_status(job["id"], "captcha_blocked")
-            captcha_blocked_count += 1
-            continue
-
         result = process_job(job)
 
         if result is None:
@@ -181,21 +168,9 @@ async def run_pipeline():
         print("     Check that ANTHROPIC_API_KEY is set correctly in GitHub Secrets.")
         report.append(f"SCORING ERRORS: {scoring_errors}/{len(new_jobs)} jobs failed")
 
-    # Also retry previously failed applications (but NOT captcha_blocked ones)
+    # Also retry previously failed applications
     failed_jobs = get_jobs_by_status("apply_failed")
-    if has_captcha_solver:
-        # With CAPTCHA solver, retry all failed jobs including Greenhouse/Lever
-        retryable_jobs = failed_jobs
-        captcha_reclassified = 0
-    else:
-        # Without CAPTCHA solver, filter out Greenhouse/Lever retries
-        retryable_jobs = [j for j in failed_jobs if j.get("ats_type") not in ("greenhouse", "lever")]
-        captcha_reclassified = len(failed_jobs) - len(retryable_jobs)
-        if captcha_reclassified > 0:
-            for job in failed_jobs:
-                if job.get("ats_type") in ("greenhouse", "lever"):
-                    update_job_status(job["id"], "captcha_blocked")
-            print(f"  🚫 Reclassified {captcha_reclassified} previously failed Greenhouse/Lever jobs as captcha_blocked")
+    retryable_jobs = failed_jobs
     if retryable_jobs:
         print(f"\n  🔄 Retrying {len(retryable_jobs)} previously failed applications...")
         for job in retryable_jobs:
@@ -206,10 +181,6 @@ async def run_pipeline():
                     "cv_path": result["cv_path"],
                     "cover_letter_path": result["cover_letter_path"],
                 })
-
-    if captcha_blocked_count > 0:
-        print(f"\n  🚫 Skipped {captcha_blocked_count} Greenhouse/Lever jobs (no CAPSOLVER_API_KEY — set it to enable)")
-        report.append(f"CAPTCHA blocked: {captcha_blocked_count} (Greenhouse/Lever — set CAPSOLVER_API_KEY to enable)")
 
     print(f"\n  → {len(qualified)} jobs qualified out of {len(new_jobs)} scored (+ {len(failed_jobs)} retries)")
     report.append(f"Scored: {len(new_jobs)} jobs")
