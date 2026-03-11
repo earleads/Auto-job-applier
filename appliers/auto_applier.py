@@ -1,22 +1,25 @@
 """
-Auto-Applier — Playwright-based form submission for multiple ATS platforms.
+Auto-Applier — Patchright-based form submission for multiple ATS platforms.
 
 Supports:
   - LinkedIn Easy Apply
+  - Greenhouse (boards.greenhouse.io) — with free AI CAPTCHA solving
+  - Lever (jobs.lever.co) — with free AI CAPTCHA solving
 
-Disabled (CAPTCHA-protected — cannot auto-submit):
-  - Greenhouse (boards.greenhouse.io) — all forms have reCAPTCHA
-  - Lever (jobs.lever.co) — all forms have reCAPTCHA + hCaptcha
+Uses Patchright (stealth Playwright fork) for anti-detection browsing and
+the recognizer library (YOLO + CLIP) for free reCAPTCHA solving.
+No paid API keys required.
 """
 
 import asyncio
 import os
 from pathlib import Path
 
-from playwright.async_api import async_playwright, Page, Browser
+from patchright.async_api import async_playwright, Page
 
 from config import CANDIDATE_PROFILE, ANTHROPIC_API_KEY
 import anthropic
+from appliers.captcha_solver import detect_and_solve, is_configured as captcha_configured
 
 # Extract contact info from profile for form filling
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -188,6 +191,12 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         await page.goto(job["url"], timeout=30000)
         await page.wait_for_timeout(3000)
 
+        # Solve CAPTCHA if present on initial page load
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked on Greenhouse page load")
+            return "captcha_blocked"
+
         # Standard Greenhouse embed form fields
         await safe_fill(page, "#first_name", APPLICANT["first_name"])
         await safe_fill(page, "#last_name", APPLICANT["last_name"])
@@ -274,6 +283,12 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                 else:
                     print(f"    ⏭️  AI skipped field: {label}")
 
+        # Solve CAPTCHA before submitting (reCAPTCHA often appears near submit)
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked before Greenhouse submit")
+            return "captcha_blocked"
+
         # Submit
         submit_clicked = await safe_click(page, "#submit_app, button[type='submit'], input[type='submit']")
         if not submit_clicked:
@@ -281,6 +296,12 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             return False
 
         await page.wait_for_timeout(5000)
+
+        # Sometimes CAPTCHA triggers after submit click — solve if needed
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked after Greenhouse submit click")
+            return "captcha_blocked"
 
         # Check for success
         content = await page.content()
@@ -308,6 +329,12 @@ async def apply_lever(page: Page, job: dict, cv_path: str, cover_letter_path: st
         # Click Apply button
         await safe_click(page, "a[href*='/apply'], .postings-btn")
         await page.wait_for_timeout(2000)
+
+        # Solve CAPTCHA if present after clicking Apply
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked on Lever apply page")
+            return "captcha_blocked"
 
         # Fill fields
         await safe_fill(page, "input[name='name']", APPLICANT["name"])
@@ -338,9 +365,21 @@ async def apply_lever(page: Page, job: dict, cv_path: str, cover_letter_path: st
                 if answer:
                     await input_el.fill(answer)
 
+        # Solve CAPTCHA before submitting
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked before Lever submit")
+            return "captcha_blocked"
+
         # Submit
         await safe_click(page, "button[type='submit'], input[type='submit']")
         await page.wait_for_timeout(3000)
+
+        # Solve CAPTCHA if triggered after submit
+        captcha_ok = await detect_and_solve(page)
+        if not captcha_ok:
+            print(f"  🚫 CAPTCHA blocked after Lever submit click")
+            return "captcha_blocked"
 
         content = await page.content()
         if any(kw in content.lower() for kw in ["thank you", "application received", "successfully"]):
@@ -456,7 +495,7 @@ async def apply_linkedin(page: Page, job: dict, cv_path: str, cover_letter_path:
 
 # ── Router ─────────────────────────────────────────────────────────────────────
 
-async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser: Browser) -> bool | str:
+async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser) -> bool | str:
     """Route application to correct ATS handler."""
     context = await browser.new_context(
         user_agent=(
@@ -464,7 +503,6 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
         )
     )
-
     page = await context.new_page()
     ats = job.get("ats_type", "other")
 
@@ -478,11 +516,9 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
             print(f"  ⏭️  Skipping {job.get('title', '?')} — no valid apply URL")
             success = False
         elif ats == "greenhouse":
-            print(f"  🚫 Greenhouse has reCAPTCHA — cannot auto-apply: {job.get('title', '?')}")
-            success = "captcha_blocked"
+            success = await apply_greenhouse(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "lever":
-            print(f"  🚫 Lever has CAPTCHA — cannot auto-apply: {job.get('title', '?')}")
-            success = "captcha_blocked"
+            success = await apply_lever(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "linkedin":
             # No LinkedIn Easy Apply — skip jobs without external apply links
             print(f"  ⏭️  LinkedIn Easy Apply not available — no external link found for {job['title']}")
@@ -499,6 +535,9 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser:
 async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
     """
     Apply to all qualified jobs. Returns list of True/False/"captcha_blocked" per job.
+
+    Uses Botright for stealth browsing and free AI-powered CAPTCHA solving.
+    No API keys required — all CAPTCHA solving runs locally.
     """
     if not jobs_with_docs:
         return []
@@ -507,7 +546,7 @@ async def run_applications(jobs_with_docs: list[dict]) -> list[bool | str]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox"]
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"]
         )
         for item in jobs_with_docs:
             success = await apply_to_job(

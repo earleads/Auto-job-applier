@@ -10,6 +10,7 @@ load_dotenv()
 
 # ── API Keys ─────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "")  # Optional: enables CAPTCHA solving for Greenhouse/Lever
 # ── Your Profile ──────────────────────────────────────────────────────────────
 CANDIDATE_PROFILE = """
 Name: Joe Allen
@@ -273,8 +274,8 @@ TARGET_GEOGRAPHY = "United States"
 ENABLED_SOURCES = {
     "linkedin": True,
     "indeed": True,
-    "greenhouse": False,  # DISABLED: all Greenhouse forms have reCAPTCHA — cannot auto-apply
-    "lever": False,       # DISABLED: all Lever forms have CAPTCHA — cannot auto-apply
+    "greenhouse": True,   # Requires CAPSOLVER_API_KEY for auto-apply (scraping works without it)
+    "lever": True,        # Requires CAPSOLVER_API_KEY for auto-apply (scraping works without it)
 }
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
