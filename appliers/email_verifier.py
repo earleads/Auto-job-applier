@@ -65,7 +65,6 @@ def _extract_code(body: str) -> str | None:
     clean = re.sub(r"\s+", " ", clean).strip()
     print(f"    ⚠️  Code extraction failed. Email snippet: {clean[:300]}")
     return None
-    return None
 
 
 # ---------- Gmail API method ----------
@@ -77,6 +76,7 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
     """Fetch verification code using Gmail API with OAuth2 refresh token."""
     global _gmail_api_broken
     if _gmail_api_broken:
+        print("    ⚠️  Gmail API marked as broken from previous attempt, skipping")
         return None
 
     try:
@@ -86,6 +86,7 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
         return None
 
     try:
+        print(f"    📧 Gmail API: authenticating...")
         # Exchange refresh token for access token
         token_resp = httpx.post(
             "https://oauth2.googleapis.com/token",
@@ -106,52 +107,36 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
                 print("    ⚠️  If Google Cloud OAuth is in 'Testing' mode, tokens expire after 7 days")
                 print("    ⚠️  Fix: re-run 'python setup_gmail.py' locally and update GMAIL_REFRESH_TOKEN secret")
                 return None
-            print(f"    ⚠️  Gmail API token error: {token_resp.text[:200]}")
+            print(f"    ⚠️  Gmail API token error ({token_resp.status_code}): {token_resp.text[:200]}")
             return None
+        print(f"    📧 Gmail API: authenticated OK")
 
         access_token = token_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {access_token}"}
 
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
 
-        # Strategy 1: Search-based (works for indexed emails)
-        after_ts = int(cutoff.timestamp())
-        search_queries = [
-            f"from:greenhouse-mail.io after:{after_ts}",
-            f"from:greenhouse after:{after_ts}",
-            f"subject:(security code) after:{after_ts}",
-            f"subject:(verification code) after:{after_ts}",
-        ]
-        messages = []
-        for query in search_queries:
-            search_resp = httpx.get(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                params={"q": query, "maxResults": 3, "includeSpamTrash": True},
-                headers=headers,
-                timeout=10,
-            )
-            if search_resp.status_code == 200:
-                messages = search_resp.json().get("messages", [])
-                if messages:
-                    break
-
-        # Strategy 2: If search found nothing, list recent messages directly.
-        # Gmail search indexing can lag behind actual delivery by minutes,
-        # so newly arrived emails may not appear in search results yet.
-        if not messages:
-            list_resp = httpx.get(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                params={"maxResults": 10, "includeSpamTrash": True},
-                headers=headers,
-                timeout=10,
-            )
-            if list_resp.status_code == 200:
-                messages = list_resp.json().get("messages", [])
-
-        if not messages:
+        # List recent messages directly — avoids Gmail search indexing delay.
+        # New emails may not appear in search results for minutes, but they
+        # always show up immediately in the message list.
+        list_resp = httpx.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            params={"maxResults": 15, "includeSpamTrash": True},
+            headers=headers,
+            timeout=10,
+        )
+        if list_resp.status_code != 200:
+            print(f"    ⚠️  Gmail API list error: {list_resp.status_code} {list_resp.text[:200]}")
             return None
 
-        # Check each candidate message for a verification code
+        messages = list_resp.json().get("messages", [])
+        if not messages:
+            print(f"    ⚠️  Gmail inbox appears empty")
+            return None
+
+        print(f"    📧 Scanning {len(messages)} recent emails...")
+
+        # Check each message for a verification code
         for msg_entry in messages:
             msg_id = msg_entry["id"]
             msg_resp = httpx.get(
@@ -168,32 +153,34 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
             # Check message age — skip if older than cutoff
             internal_ts = int(msg_data.get("internalDate", "0")) / 1000
             if internal_ts > 0 and datetime.fromtimestamp(internal_ts, tz=timezone.utc) < cutoff:
-                continue
+                print(f"    📧 Skipping older message (id={msg_id[:8]}...)")
+                break  # Messages are ordered newest-first; stop once we hit old ones
 
-            # Check if this looks like a verification email
+            # Get sender/subject for logging
             msg_headers = {
                 h["name"].lower(): h["value"]
                 for h in msg_data.get("payload", {}).get("headers", [])
             }
             sender = msg_headers.get("from", "").lower()
             subject = msg_headers.get("subject", "").lower()
+            print(f"    📧 Checking email: from={sender[:80]}, subject={subject[:80]}")
 
-            is_verification = (
-                "greenhouse" in sender
-                or "security code" in subject
-                or "verification code" in subject
-                or "verify" in subject
-            )
-            if not is_verification:
+            # Check if this could be a verification email (broad match)
+            VERIFICATION_KEYWORDS = [
+                "greenhouse", "security code", "verification code",
+                "verify", "confirm your", "application", "code",
+            ]
+            is_candidate = any(kw in sender or kw in subject for kw in VERIFICATION_KEYWORDS)
+            if not is_candidate:
+                print(f"    📧 Skipped (no verification keywords)")
                 continue
-
-            print(f"    📧 Found candidate email: from={sender[:60]}, subject={subject[:60]}")
 
             # Extract body and try to find the code
             body = _extract_body_from_gmail_payload(msg_data.get("payload", {}))
             if body:
                 code = _extract_code(body)
                 if code:
+                    print(f"    📧 Extracted code from body: {code}")
                     return code
 
             # Fallback: try snippet (short preview text)
@@ -201,12 +188,17 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
             if snippet:
                 code = _extract_code(snippet)
                 if code:
+                    print(f"    📧 Extracted code from snippet: {code}")
                     return code
+
+            print(f"    📧 Email matched but no code found in body/snippet")
 
         return None
 
     except Exception as e:
+        import traceback
         print(f"    ⚠️  Gmail API error: {e}")
+        traceback.print_exc()
         return None
 
 
@@ -323,7 +315,10 @@ async def fetch_verification_code(email_address: str, max_wait: int = 120, poll_
     method = "Gmail API" if _use_gmail_api() else "IMAP"
     print(f"    📧 Waiting for Greenhouse verification email... (via {method})")
     elapsed = 0
+    poll_count = 0
     while elapsed < max_wait:
+        poll_count += 1
+        print(f"    📧 Poll #{poll_count} (elapsed {elapsed}s/{max_wait}s)...")
         code = await asyncio.get_event_loop().run_in_executor(
             None, _fetch_greenhouse_code, email_address
         )
