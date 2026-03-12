@@ -69,8 +69,9 @@ If it's a dropdown/multiple choice, return exactly one of the provided options.
 Otherwise return a short text answer (under 100 words).
 
 IMPORTANT: If you cannot answer because the field asks for something you don't have
-(security codes, CAPTCHAs, verification codes, SSN, passwords, salary expectations
-with no basis, etc.), respond with exactly: SKIP
+(CAPTCHAs, SSN, passwords, salary expectations with no basis, etc.),
+respond with exactly: SKIP
+Note: Do NOT skip "Security Code" fields — those are handled separately.
 
 Output ONLY the answer (or SKIP), nothing else.
 """
@@ -301,9 +302,29 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             ]):
                 continue
 
+            # Security Code field — handle specially (request code via email)
+            if "security code" in label_lower:
+                print(f"    🔐 Security Code field detected — requesting verification email...")
+                if email_configured():
+                    code = await fetch_verification_code(APPLICANT["email"], max_wait=120)
+                    if code:
+                        code_input = await field.query_selector(
+                            "input[type='text'], input[type='number'], input:not([type='hidden'])"
+                        )
+                        if code_input:
+                            await code_input.fill(code)
+                            print(f"    📧 Entered security code: {code}")
+                        else:
+                            print(f"    ⚠️  Got code but could not find input in Security Code field")
+                    else:
+                        print(f"    ⚠️  Security code not received via email")
+                else:
+                    print(f"    ⚠️  Security Code required but Gmail not configured")
+                continue
+
             # Skip fields we can't/shouldn't fill
             SKIP_FIELDS = [
-                "captcha", "verification", "verify",
+                "captcha",
                 "password", "ssn", "social security", "eeoc",
                 "gender", "race", "ethnicity", "veteran", "disability",
                 "i-9", "w-4", "authorization code",
@@ -375,6 +396,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                         print(f"    ⚠️  Could not fill '{label[:40]}': {e}")
                 else:
                     print(f"    ⏭️  AI skipped field: {label}")
+
+        # Pre-submit screenshot for debugging (shows filled form before clicking submit)
+        await capture_screenshot(page, job, "pre_submit")
+        print(f"    📸 Pre-submit screenshot saved")
 
         # Solve CAPTCHA before submitting (reCAPTCHA often appears near submit)
         captcha_ok = await detect_and_solve(page)
