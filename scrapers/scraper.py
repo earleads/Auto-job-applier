@@ -400,6 +400,51 @@ async def fetch_linkedin_job_details(page: Page, job: dict) -> dict:
                     job["apply_url"] = resolved_url
                     job["ats_type"] = ats_type if ats_type != "other" else "generic"
 
+        # Fallback: if no apply link found yet, try clicking the Apply button
+        # and capturing the navigation/redirect to find the external ATS URL
+        if not job.get("apply_url"):
+            try:
+                apply_btn = await page.query_selector(
+                    "a.apply-button, "
+                    "button.apply-button, "
+                    ".top-card-layout__cta-container a, "
+                    "a[data-tracking-control-name*='apply'], "
+                    "button[data-tracking-control-name*='apply']"
+                )
+                if apply_btn:
+                    href = await apply_btn.get_attribute("href")
+                    if href:
+                        # Parse LinkedIn's URL-encoded redirect parameter
+                        from urllib.parse import urlparse, parse_qs, unquote
+                        if "linkedin.com/redir" in href or "url=" in href:
+                            parsed = urlparse(href)
+                            params = parse_qs(parsed.query)
+                            target = params.get("url", [None])[0]
+                            if target:
+                                target = unquote(target)
+                                ats_type = detect_ats(target)
+                                label = ats_type if ats_type != "other" else "generic"
+                                print(f"    🔗 Extracted from redirect param → {label}: {target[:80]}")
+                                job["apply_url"] = target
+                                job["ats_type"] = ats_type if ats_type != "other" else "generic"
+                        elif href and "linkedin.com" not in href and href.startswith("http"):
+                            ats_type = detect_ats(href)
+                            label = ats_type if ats_type != "other" else "generic"
+                            print(f"    🔗 Apply button href → {label}: {href[:80]}")
+                            job["apply_url"] = href
+                            job["ats_type"] = ats_type if ats_type != "other" else "generic"
+                        elif href:
+                            # Follow the link to see where it goes
+                            resolved = await _resolve_redirect(href)
+                            if resolved and "linkedin.com" not in resolved:
+                                ats_type = detect_ats(resolved)
+                                label = ats_type if ats_type != "other" else "generic"
+                                print(f"    🔗 Apply button resolved → {label}: {resolved[:80]}")
+                                job["apply_url"] = resolved
+                                job["ats_type"] = ats_type if ats_type != "other" else "generic"
+            except Exception as e:
+                print(f"    ⚠️  Apply button fallback failed: {e}")
+
     except Exception as e:
         print(f"    ⚠️  Job detail fetch failed: {e}")
 
