@@ -23,6 +23,7 @@ from patchright.async_api import async_playwright, Page
 from config import CANDIDATE_PROFILE, ANTHROPIC_API_KEY
 import anthropic
 from appliers.captcha_solver import detect_and_solve, is_configured as captcha_configured
+from appliers.email_verifier import fetch_verification_code, is_configured as email_configured
 
 # Extract contact info from profile for form filling
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -411,6 +412,44 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         if not captcha_ok:
             print(f"  🚫 CAPTCHA blocked after Greenhouse submit click")
             return "captcha_blocked"
+
+        # Check for Greenhouse email verification code prompt
+        # Some companies require a security code sent to the applicant's email
+        content_after_submit = (await page.content()).lower()
+        needs_code = any(kw in content_after_submit for kw in [
+            "security code", "verification code", "enter the code",
+            "check your email", "code from your email",
+        ])
+        if needs_code and email_configured():
+            code = await fetch_verification_code(APPLICANT["email"], max_wait=60)
+            if code:
+                # Find the security code input field and enter it
+                code_input = await page.query_selector(
+                    "input[name*='security'], input[name*='code'], "
+                    "input[id*='security'], input[id*='code'], "
+                    "input[placeholder*='code'], input[placeholder*='security'], "
+                    "input[type='text']:not(#first_name):not(#last_name):not(#email):not(#phone)"
+                )
+                if code_input:
+                    await code_input.fill(code)
+                    print(f"    📧 Entered verification code: {code}")
+                    await page.wait_for_timeout(1000)
+                    # Re-submit with the code
+                    for sel in ["#submit_app", "button[type='submit']", "input[type='submit']"]:
+                        el = await page.query_selector(sel)
+                        if el:
+                            try:
+                                await el.click(timeout=5000)
+                            except Exception:
+                                await el.evaluate("el => el.click()")
+                            break
+                    await page.wait_for_timeout(5000)
+                else:
+                    print(f"    ⚠️  Got code but could not find input field")
+            else:
+                print(f"    ⚠️  Verification code required but not received")
+        elif needs_code:
+            print(f"    ⚠️  Verification code required but GMAIL_APP_PASSWORD not configured")
 
         # Check for success — Greenhouse shows various confirmation messages
         content = (await page.content()).lower()
