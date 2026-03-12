@@ -66,6 +66,7 @@ def init_db():
     # Migrations: add columns that may not exist in older databases
     _migrate_add_column(conn, "jobs", "apply_url", "TEXT")
     _migrate_add_column(conn, "jobs", "ats_type", "TEXT")
+    _migrate_add_column(conn, "jobs", "retry_count", "INTEGER DEFAULT 0")
 
     conn.commit()
     conn.close()
@@ -123,6 +124,19 @@ def log_application(job_id: str, cv_path: str, cover_letter_path: str, notes: st
     """, (job_id, datetime.now(timezone.utc).isoformat(), cv_path, cover_letter_path, notes))
     conn.commit()
     conn.close()
+
+
+def increment_retry(job_id: str, max_retries: int = 2) -> bool:
+    """Increment retry count. Returns True if job should be skipped (exceeded max)."""
+    conn = get_conn()
+    conn.execute("UPDATE jobs SET retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?", (job_id,))
+    conn.commit()
+    row = conn.execute("SELECT retry_count FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    conn.close()
+    if row and (row[0] or 0) > max_retries:
+        update_job_status(job_id, "skipped")
+        return True
+    return False
 
 
 def get_jobs_by_status(status: str) -> list:

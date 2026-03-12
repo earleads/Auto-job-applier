@@ -25,7 +25,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import SCRAPE_INTERVAL_HOURS, MAX_APPLICATIONS_PER_DAY, MIN_MATCH_SCORE, ANTHROPIC_API_KEY, DB_PATH
 from database import (
     init_db, get_jobs_by_status, update_job_score, update_job_status,
-    log_application, count_today_applications, get_stats
+    log_application, count_today_applications, get_stats, increment_retry
 )
 from scrapers.scraper import run_scrapers
 from generators.ai_generator import process_job
@@ -244,8 +244,13 @@ async def run_pipeline():
                     report.append(f"  APPLIED: {job['title']} @ {job['company']}")
                 else:
                     update_job_status(job["id"], "apply_failed")
+                    skipped = increment_retry(job["id"], max_retries=2)
                     failed_count += 1
-                    report.append(f"  FAILED:  {job['title']} @ {job['company']}")
+                    if skipped:
+                        report.append(f"  SKIPPED: {job['title']} @ {job['company']} (max retries exceeded)")
+                        print(f"    ⏭️  Skipping {job['title']} @ {job['company']} — failed {3}+ times")
+                    else:
+                        report.append(f"  FAILED:  {job['title']} @ {job['company']}")
 
             print(f"\n  ✅ Successfully applied: {applied_count}/{len(to_apply)}")
             if failed_count > 0:
