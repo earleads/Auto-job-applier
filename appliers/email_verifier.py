@@ -46,7 +46,12 @@ CODE_PATTERNS = [
     r"security code field[^:]*:\s*\n?\s*([A-Za-z0-9]{6,10})",
     r"<(?:strong|b|span)[^>]*>\s*([A-Za-z0-9]{6,10})\s*</(?:strong|b|span)>",
     r"(?:security|verification)\s*code[^A-Za-z0-9]*([A-Za-z0-9]{6,10})",
+    # Code on its own line (common Greenhouse format)
     r"\n\s*([A-Za-z0-9]{6,10})\s*\n",
+    # Code after "is:" or "is :" patterns  (e.g. "Your code is: Ab3xK9")
+    r"(?:code|is)[:\s]+([A-Za-z0-9]{6,10})\b",
+    # Bold/large standalone code in HTML (e.g. <td>Ab3xK9</td> or <p>Ab3xK9</p>)
+    r"<(?:td|p|div|h[1-6])[^>]*>\s*([A-Za-z0-9]{6,10})\s*</(?:td|p|div|h[1-6])>",
 ]
 
 
@@ -55,6 +60,11 @@ def _extract_code(body: str) -> str | None:
         match = re.search(pattern, body, re.IGNORECASE)
         if match:
             return match.group(1)
+    # If no pattern matched, log a snippet for debugging
+    clean = re.sub(r"<[^>]+>", " ", body)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    print(f"    ⚠️  Code extraction failed. Email snippet: {clean[:300]}")
+    return None
     return None
 
 
@@ -102,9 +112,10 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
         access_token = token_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {access_token}"}
 
-        # Search for recent Greenhouse emails (searches ALL folders incl. spam)
-        after_ts = int((datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).timestamp())
-        # Try multiple search queries from narrow to broad
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+
+        # Strategy 1: Search-based (works for indexed emails)
+        after_ts = int(cutoff.timestamp())
         search_queries = [
             f"from:greenhouse-mail.io after:{after_ts}",
             f"from:greenhouse after:{after_ts}",
@@ -119,38 +130,78 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
                 headers=headers,
                 timeout=10,
             )
-            if search_resp.status_code != 200:
-                print(f"    ⚠️  Gmail API search error: {search_resp.text[:200]}")
-                continue
-            messages = search_resp.json().get("messages", [])
-            if messages:
-                break
+            if search_resp.status_code == 200:
+                messages = search_resp.json().get("messages", [])
+                if messages:
+                    break
+
+        # Strategy 2: If search found nothing, list recent messages directly.
+        # Gmail search indexing can lag behind actual delivery by minutes,
+        # so newly arrived emails may not appear in search results yet.
+        if not messages:
+            list_resp = httpx.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                params={"maxResults": 10, "includeSpamTrash": True},
+                headers=headers,
+                timeout=10,
+            )
+            if list_resp.status_code == 200:
+                messages = list_resp.json().get("messages", [])
 
         if not messages:
             return None
 
-        # Get the most recent message
-        msg_id = messages[0]["id"]
-        msg_resp = httpx.get(
-            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
-            params={"format": "full"},
-            headers=headers,
-            timeout=10,
-        )
-        if msg_resp.status_code != 200:
-            return None
+        # Check each candidate message for a verification code
+        for msg_entry in messages:
+            msg_id = msg_entry["id"]
+            msg_resp = httpx.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
+                params={"format": "full"},
+                headers=headers,
+                timeout=10,
+            )
+            if msg_resp.status_code != 200:
+                continue
 
-        msg_data = msg_resp.json()
+            msg_data = msg_resp.json()
 
-        # Extract body from the message payload
-        body = _extract_body_from_gmail_payload(msg_data.get("payload", {}))
-        if body:
-            return _extract_code(body)
+            # Check message age — skip if older than cutoff
+            internal_ts = int(msg_data.get("internalDate", "0")) / 1000
+            if internal_ts > 0 and datetime.fromtimestamp(internal_ts, tz=timezone.utc) < cutoff:
+                continue
 
-        # Fallback: try snippet (short preview text)
-        snippet = msg_data.get("snippet", "")
-        if snippet:
-            return _extract_code(snippet)
+            # Check if this looks like a verification email
+            msg_headers = {
+                h["name"].lower(): h["value"]
+                for h in msg_data.get("payload", {}).get("headers", [])
+            }
+            sender = msg_headers.get("from", "").lower()
+            subject = msg_headers.get("subject", "").lower()
+
+            is_verification = (
+                "greenhouse" in sender
+                or "security code" in subject
+                or "verification code" in subject
+                or "verify" in subject
+            )
+            if not is_verification:
+                continue
+
+            print(f"    📧 Found candidate email: from={sender[:60]}, subject={subject[:60]}")
+
+            # Extract body and try to find the code
+            body = _extract_body_from_gmail_payload(msg_data.get("payload", {}))
+            if body:
+                code = _extract_code(body)
+                if code:
+                    return code
+
+            # Fallback: try snippet (short preview text)
+            snippet = msg_data.get("snippet", "")
+            if snippet:
+                code = _extract_code(snippet)
+                if code:
+                    return code
 
         return None
 
