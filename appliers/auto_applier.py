@@ -420,6 +420,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             "security code", "verification code", "enter the code",
             "check your email", "code from your email",
         ])
+        code_entered = False
         if needs_code and email_configured():
             code = await fetch_verification_code(APPLICANT["email"], max_wait=60)
             if code:
@@ -444,12 +445,19 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                                 await el.evaluate("el => el.click()")
                             break
                     await page.wait_for_timeout(5000)
+                    code_entered = True
                 else:
                     print(f"    ⚠️  Got code but could not find input field")
             else:
                 print(f"    ⚠️  Verification code required but not received")
         elif needs_code:
             print(f"    ⚠️  Verification code required but GMAIL_APP_PASSWORD not configured")
+
+        # If verification code was needed but not entered, this is a failure
+        if needs_code and not code_entered:
+            await capture_screenshot(page, job, "needs_verification")
+            print(f"  ❌ Application incomplete — verification code not entered")
+            return False
 
         # Check for success — Greenhouse shows various confirmation messages
         content = (await page.content()).lower()
