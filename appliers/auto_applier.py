@@ -451,7 +451,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             else:
                 print(f"    ⚠️  Verification code required but not received")
         elif needs_code:
-            print(f"    ⚠️  Verification code required but GMAIL_APP_PASSWORD not configured")
+            print(f"    ⚠️  Verification code required but email verification not configured/working")
 
         # If verification code was needed but not entered, this is a failure
         if needs_code and not code_entered:

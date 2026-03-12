@@ -60,8 +60,15 @@ def _extract_code(body: str) -> str | None:
 
 # ---------- Gmail API method ----------
 
+_gmail_api_broken = False  # Set to True if refresh token is invalid (avoid repeated retries)
+
+
 def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str | None:
     """Fetch verification code using Gmail API with OAuth2 refresh token."""
+    global _gmail_api_broken
+    if _gmail_api_broken:
+        return None
+
     try:
         import httpx
     except ImportError:
@@ -81,6 +88,14 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
             timeout=10,
         )
         if token_resp.status_code != 200:
+            resp_data = token_resp.json() if token_resp.headers.get("content-type", "").startswith("application/json") else {}
+            error_code = resp_data.get("error", "")
+            if error_code == "invalid_grant":
+                _gmail_api_broken = True
+                print("    ⚠️  Gmail refresh token expired or revoked (invalid_grant)")
+                print("    ⚠️  If Google Cloud OAuth is in 'Testing' mode, tokens expire after 7 days")
+                print("    ⚠️  Fix: re-run 'python setup_gmail.py' locally and update GMAIL_REFRESH_TOKEN secret")
+                return None
             print(f"    ⚠️  Gmail API token error: {token_resp.text[:200]}")
             return None
 
