@@ -11,6 +11,7 @@ Usage:
     python main.py --dry-run    # Scrape + score but don't apply
     python main.py --test       # Quick run: 1 LinkedIn query, skip detail fetch, max 2 apps
     python main.py --reset      # Clear job database before running (re-scrape everything)
+    python main.py --apply-only # Skip scraping, score + apply to jobs already in DB
 """
 
 import asyncio
@@ -58,6 +59,7 @@ def check_api_key():
 DRY_RUN = "--dry-run" in sys.argv
 TEST_MODE = "--test" in sys.argv
 RESET_DB = "--reset" in sys.argv
+APPLY_ONLY = "--apply-only" in sys.argv
 REPORT_PATH = "data/run_report.txt"
 
 
@@ -105,32 +107,39 @@ async def run_pipeline():
     print(f"\n{'='*54}")
     print(f"🚀 Pipeline started at {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
     print("🔐 CAPTCHA solver: ENABLED (Patchright + recognizer AI — free, no API key needed)")
+    if APPLY_ONLY:
+        print("📋 APPLY-ONLY MODE — skipping scraping, processing existing jobs in DB")
+        report.append("Mode: APPLY-ONLY")
     if TEST_MODE:
         print("🧪 TEST MODE — 1 LinkedIn query, up to 5 jobs, skip detail fetch")
         report.append("Mode: TEST")
     if DRY_RUN:
         print("🔍 DRY RUN MODE — applications will not be submitted")
         report.append("Mode: DRY RUN")
-    elif not TEST_MODE:
+    elif not TEST_MODE and not APPLY_ONLY:
         report.append("Mode: LIVE")
     print(f"{'='*54}")
 
     # ── Step 1: Scrape ─────────────────────────────────────
-    print("\n[1/4] SCRAPING JOB BOARDS...")
-    new_count, source_counts = await run_scrapers(test_mode=TEST_MODE)
+    if APPLY_ONLY:
+        print("\n[1/4] SKIPPED (--apply-only)")
+        report.append("Scraping: SKIPPED (apply-only mode)")
+    else:
+        print("\n[1/4] SCRAPING JOB BOARDS...")
+        new_count, source_counts = await run_scrapers(test_mode=TEST_MODE)
 
-    # Diagnostics: per-source breakdown
-    print(f"\n  📡 Scrape results by source:")
-    for source, count in source_counts.items():
-        print(f"     {source}: {count} new jobs")
-    report.append(f"Scraped: {new_count} total new jobs")
-    for source, count in source_counts.items():
-        report.append(f"  {source}: {count}")
+        # Diagnostics: per-source breakdown
+        print(f"\n  📡 Scrape results by source:")
+        for source, count in source_counts.items():
+            print(f"     {source}: {count} new jobs")
+        report.append(f"Scraped: {new_count} total new jobs")
+        for source, count in source_counts.items():
+            report.append(f"  {source}: {count}")
 
-    if new_count == 0:
-        print("\n  ⚠️  WARNING: Zero new jobs scraped across all sources!")
-        print("     Possible causes: bot detection, expired session, or no new postings")
-        report.append("WARNING: Zero new jobs scraped")
+        if new_count == 0:
+            print("\n  ⚠️  WARNING: Zero new jobs scraped across all sources!")
+            print("     Possible causes: bot detection, expired session, or no new postings")
+            report.append("WARNING: Zero new jobs scraped")
 
     # ── Step 2: Score new jobs ─────────────────────────────
     print("\n[2/4] SCORING NEW JOBS...")

@@ -15,6 +15,7 @@ on:
           - full
           - test
           - dry-run
+          - apply-only
       reset:
         description: 'Clear job database before running (re-scrape everything)'
         required: false
@@ -48,13 +49,16 @@ jobs:
         continue-on-error: true
 
       - name: Run job applier
-        timeout-minutes: 10
+        timeout-minutes: 30
         env:
           PYTHONUNBUFFERED: "1"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
         run: |
           MODE="${{ inputs.mode }}"
           # Default to test mode for scheduled runs (inputs are empty)
@@ -62,6 +66,7 @@ jobs:
           FLAGS=""
           if [ "$MODE" = "test" ]; then FLAGS="--test"; fi
           if [ "$MODE" = "dry-run" ]; then FLAGS="--dry-run"; fi
+          if [ "$MODE" = "apply-only" ]; then FLAGS="--apply-only"; fi
           if [ "${{ inputs.reset }}" = "true" ]; then FLAGS="$FLAGS --reset"; fi
           python main.py $FLAGS
 
