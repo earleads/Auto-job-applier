@@ -253,20 +253,30 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         await safe_fill(page, "input[autocomplete='url']", APPLICANT["linkedin"])
 
         # Location (if asked) — Greenhouse uses autocomplete dropdown
-        loc_input = await page.query_selector("#job_application_location")
+        # The #job_application_location might be a <div> wrapper, so find the actual input inside
+        loc_input = await page.query_selector(
+            "#job_application_location input[type='text'], "
+            "input#job_application_location, "
+            "[data-field='job_application_location'] input[type='text'], "
+            "input[name*='location']"
+        )
         if loc_input:
-            await loc_input.fill("")
-            await loc_input.type(APPLICANT["location"].split("(")[0].strip(), delay=50)
-            await page.wait_for_timeout(1500)
-            # Select first autocomplete suggestion if dropdown appears
-            suggestion = await page.query_selector(
-                ".autocomplete-results li, .location-autocomplete li, "
-                "[class*='autocomplete'] li, [role='option'], "
-                ".ui-menu-item, [class*='suggestion']"
-            )
-            if suggestion:
-                await suggestion.click()
-                await page.wait_for_timeout(500)
+            try:
+                await loc_input.fill("")
+                await loc_input.type(APPLICANT["location"].split("(")[0].strip(), delay=50)
+                await page.wait_for_timeout(1500)
+                # Select first autocomplete suggestion if dropdown appears
+                suggestion = await page.query_selector(
+                    ".autocomplete-results li, .location-autocomplete li, "
+                    "[class*='autocomplete'] li, [role='option'], "
+                    ".ui-menu-item, [class*='suggestion']"
+                )
+                if suggestion:
+                    await suggestion.click()
+                    await page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"    ⚠️  Location fill failed, trying safe_fill: {e}")
+                await safe_fill(page, "input[name*='location']", APPLICANT["location"])
 
         # Resume upload — Greenhouse uses JS-based S3 upload, not <input type="file">
         await greenhouse_upload_file(page, "resume", cv_path)
@@ -901,9 +911,55 @@ async def apply_to_job(job: dict, cv_path: str, cover_letter_path: str, browser)
         elif ats in GENERIC_ATS_TYPES:
             success = await apply_generic(page, job_for_apply, cv_path, cover_letter_path)
         elif ats == "linkedin":
-            # No LinkedIn Easy Apply — skip jobs without external apply links
-            print(f"  ⏭️  LinkedIn Easy Apply not supported — no external link found for {job['title']}")
-            success = False
+            # LinkedIn-sourced job without detected external ATS link.
+            # Try the original LinkedIn URL with generic applier — some jobs
+            # have an "Apply on company website" button we can follow at runtime.
+            job_for_apply["url"] = job["url"]  # Use original LinkedIn URL
+            print(f"  💼 LinkedIn job (no external link detected) — attempting to find apply link at runtime")
+            try:
+                await page.goto(job["url"], timeout=20000)
+                await page.wait_for_timeout(3000)
+                # Look for external apply button on the LinkedIn job page
+                apply_btn = await page.query_selector(
+                    "a.apply-button:not([href*='linkedin.com/login']), "
+                    "a[data-tracking-control-name*='apply']:not([href*='linkedin.com/login']), "
+                    ".top-card-layout__cta-container a:not([href*='linkedin.com/login']), "
+                    "a[href*='boards.greenhouse.io'], "
+                    "a[href*='jobs.lever.co'], "
+                    "a[href*='myworkday'], "
+                    "a[href*='careers']"
+                )
+                if apply_btn:
+                    href = await apply_btn.get_attribute("href") or ""
+                    if href and "linkedin.com" not in href and href.startswith("http"):
+                        print(f"    🔗 Found external link at runtime: {href[:80]}")
+                        job_for_apply["url"] = href
+                        success = await apply_generic(page, job_for_apply, cv_path, cover_letter_path)
+                    elif href:
+                        # Try clicking and capturing the redirect
+                        try:
+                            await apply_btn.click(timeout=5000)
+                            await page.wait_for_timeout(3000)
+                            new_url = page.url
+                            if "linkedin.com" not in new_url:
+                                print(f"    🔗 Redirected to: {new_url[:80]}")
+                                job_for_apply["url"] = new_url
+                                success = await apply_generic(page, job_for_apply, cv_path, cover_letter_path)
+                            else:
+                                print(f"  ⏭️  Apply button stayed on LinkedIn — likely Easy Apply")
+                                success = False
+                        except Exception:
+                            print(f"  ⏭️  Could not follow apply button")
+                            success = False
+                    else:
+                        print(f"  ⏭️  No external apply link found for {job['title']}")
+                        success = False
+                else:
+                    print(f"  ⏭️  No apply button found on LinkedIn page for {job['title']}")
+                    success = False
+            except Exception as e:
+                print(f"  ❌ LinkedIn runtime apply failed: {e}")
+                success = False
         else:
             print(f"  ⏭️  Unknown ATS type '{ats}' — skipping auto-apply")
             success = False
