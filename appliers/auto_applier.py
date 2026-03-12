@@ -422,7 +422,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         ])
         code_entered = False
         if needs_code and email_configured():
-            code = await fetch_verification_code(APPLICANT["email"], max_wait=60)
+            code = await fetch_verification_code(APPLICANT["email"], max_wait=120)
             if code:
                 # Find the security code input field and enter it
                 code_input = await page.query_selector(

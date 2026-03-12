@@ -102,30 +102,29 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
         access_token = token_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {access_token}"}
 
-        # Search for recent Greenhouse emails
+        # Search for recent Greenhouse emails (searches ALL folders incl. spam)
         after_ts = int((datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).timestamp())
-        query = f"from:no-reply@us.greenhouse-mail.io after:{after_ts}"
-        search_resp = httpx.get(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            params={"q": query, "maxResults": 3},
-            headers=headers,
-            timeout=10,
-        )
-        if search_resp.status_code != 200:
-            print(f"    ⚠️  Gmail API search error: {search_resp.text[:200]}")
-            return None
-
-        messages = search_resp.json().get("messages", [])
-        if not messages:
-            # Try broader search
-            query = f"subject:security code after:{after_ts}"
+        # Try multiple search queries from narrow to broad
+        search_queries = [
+            f"from:greenhouse-mail.io after:{after_ts}",
+            f"from:greenhouse after:{after_ts}",
+            f"subject:(security code) after:{after_ts}",
+            f"subject:(verification code) after:{after_ts}",
+        ]
+        messages = []
+        for query in search_queries:
             search_resp = httpx.get(
                 "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                params={"q": query, "maxResults": 3},
+                params={"q": query, "maxResults": 3, "includeSpamTrash": True},
                 headers=headers,
                 timeout=10,
             )
+            if search_resp.status_code != 200:
+                print(f"    ⚠️  Gmail API search error: {search_resp.text[:200]}")
+                continue
             messages = search_resp.json().get("messages", [])
+            if messages:
+                break
 
         if not messages:
             return None
@@ -258,7 +257,7 @@ def _fetch_greenhouse_code(email_address: str, max_age_minutes: int = 10) -> str
     return None
 
 
-async def fetch_verification_code(email_address: str, max_wait: int = 60, poll_interval: int = 5) -> str | None:
+async def fetch_verification_code(email_address: str, max_wait: int = 120, poll_interval: int = 8) -> str | None:
     """
     Poll Gmail for a Greenhouse verification code.
 
