@@ -71,7 +71,8 @@ Otherwise return a short text answer (under 100 words).
 IMPORTANT: If you cannot answer because the field asks for something you don't have
 (CAPTCHAs, SSN, passwords, salary expectations with no basis, etc.),
 respond with exactly: SKIP
-Note: Do NOT skip "Security Code" fields — those are handled separately.
+IMPORTANT: For "Security Code", "Verification Code", or "Enter the code" fields,
+ALWAYS respond with exactly: SKIP (these are handled separately via email).
 
 Output ONLY the answer (or SKIP), nothing else.
 """
@@ -303,39 +304,71 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                 continue
 
             # Security Code field — handle specially (request code via email)
-            if "security code" in label_lower:
-                print(f"    🔐 Security Code field detected — requesting verification email...")
+            is_security_code_field = (
+                "security code" in label_lower
+                or "verification code" in label_lower
+                or "enter the code" in label_lower
+                or "enter code" in label_lower
+                or (label_lower.strip() in ("code", "security code*", "verification code*"))
+            )
+            if is_security_code_field:
+                print(f"    🔐 Security Code field detected (label='{label}') — requesting verification email...")
                 if email_configured():
+                    # First, look for a "Send Code" / "Request Code" button and click it
+                    send_btn = await field.query_selector(
+                        "button, a[href='#'], input[type='button'], input[type='submit']"
+                    )
+                    if not send_btn:
+                        send_btn = await page.query_selector(
+                            "button:has-text('send'), button:has-text('code'), "
+                            "a:has-text('send'), a:has-text('code')"
+                        )
+                    if send_btn:
+                        btn_text = (await send_btn.inner_text()).strip()
+                        print(f"    📧 Clicking send-code button: '{btn_text[:40]}'")
+                        try:
+                            await send_btn.click(timeout=5000)
+                            await page.wait_for_timeout(2000)  # Wait for code to be sent
+                        except Exception as e:
+                            print(f"    ⚠️  Click failed: {e}")
+
                     code = await fetch_verification_code(APPLICANT["email"], max_wait=120)
                     if code:
+                        # Wait briefly for input field to become visible after code is requested
+                        await page.wait_for_timeout(1000)
+
+                        # Try multiple strategies to find the input
+                        code_input = None
+                        # Strategy 1: Look inside the field container
                         code_input = await field.query_selector(
                             "input[type='text'], input[type='number'], input:not([type='hidden'])"
                         )
+                        # Strategy 2: Search the whole page
                         if not code_input:
-                            # Fallback: search the whole page for code input
                             code_input = await page.query_selector(
                                 "input[name*='security'], input[name*='code'], "
                                 "input[id*='security'], input[id*='code'], "
                                 "input[placeholder*='code']"
                             )
+
                         if code_input:
+                            # Always use JS to set value — avoids visibility issues
+                            print(f"    📧 Setting security code via JS: {code}")
+                            await code_input.evaluate(
+                                """(el, val) => {
+                                    el.value = val;
+                                    el.focus();
+                                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                                    el.blur();
+                                }""",
+                                code,
+                            )
+                            # Also try fill() with force as a second attempt
                             try:
-                                await code_input.scroll_into_view_if_needed(timeout=5000)
+                                await code_input.fill(code, force=True, timeout=3000)
                             except Exception:
-                                pass
-                            try:
-                                await code_input.fill(code, timeout=5000)
-                            except Exception:
-                                # Element not visible — use JS to set value directly
-                                print(f"    ⚠️  fill() failed, using JS to set value...")
-                                await code_input.evaluate(
-                                    """(el, val) => {
-                                        el.value = val;
-                                        el.dispatchEvent(new Event('input', {bubbles: true}));
-                                        el.dispatchEvent(new Event('change', {bubbles: true}));
-                                    }""",
-                                    code,
-                                )
+                                pass  # JS set above is sufficient
                             print(f"    📧 Entered security code: {code}")
                         else:
                             print(f"    ⚠️  Got code but could not find input in Security Code field")
@@ -480,22 +513,22 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                     "input[type='text']:not(#first_name):not(#last_name):not(#email):not(#phone)"
                 )
                 if code_input:
+                    # Use JS first to avoid visibility issues, then try fill with force
+                    print(f"    📧 Setting verification code via JS: {code}")
+                    await code_input.evaluate(
+                        """(el, val) => {
+                            el.value = val;
+                            el.focus();
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                            el.blur();
+                        }""",
+                        code,
+                    )
                     try:
-                        await code_input.scroll_into_view_if_needed(timeout=5000)
+                        await code_input.fill(code, force=True, timeout=3000)
                     except Exception:
-                        pass
-                    try:
-                        await code_input.fill(code, timeout=5000)
-                    except Exception:
-                        print(f"    ⚠️  fill() failed, using JS to set value...")
-                        await code_input.evaluate(
-                            """(el, val) => {
-                                el.value = val;
-                                el.dispatchEvent(new Event('input', {bubbles: true}));
-                                el.dispatchEvent(new Event('change', {bubbles: true}));
-                            }""",
-                            code,
-                        )
+                        pass  # JS set above is sufficient
                     print(f"    📧 Entered verification code: {code}")
                     await page.wait_for_timeout(1000)
                     # Re-submit with the code
