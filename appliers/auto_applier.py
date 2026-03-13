@@ -399,15 +399,52 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             # Dropdowns (select elements)
             select_el = await field.query_selector("select")
             if select_el:
-                options = await select_el.inner_text()
-                option_list = [o.strip() for o in options.split("\n") if o.strip()]
+                # Get all option elements with their text and values
+                all_options = await select_el.query_selector_all("option")
+                option_list = []
+                for opt_el in all_options:
+                    opt_text = (await opt_el.inner_text()).strip()
+                    if opt_text:
+                        option_list.append(opt_text)
+
                 if option_list:
                     answer = await ai_fill_field(label, option_list)
-                    if answer:
+                    if answer and answer.upper() != "SKIP":
+                        selected = False
+                        # Try exact label match
                         try:
                             await select_el.select_option(label=answer)
+                            selected = True
                         except Exception:
                             pass
+                        # Try case-insensitive match
+                        if not selected:
+                            for opt_el in all_options:
+                                opt_text = (await opt_el.inner_text()).strip()
+                                if opt_text.lower() == answer.strip().lower():
+                                    opt_value = await opt_el.get_attribute("value")
+                                    if opt_value is not None:
+                                        try:
+                                            await select_el.select_option(value=opt_value)
+                                            selected = True
+                                            break
+                                        except Exception:
+                                            pass
+                        # Try by value attribute
+                        if not selected:
+                            try:
+                                await select_el.select_option(value=answer)
+                                selected = True
+                            except Exception:
+                                pass
+                        if selected:
+                            print(f"    ✅ Selected '{answer}' for: {label[:50]}")
+                        else:
+                            print(f"    ⚠️  Could not select '{answer}' from {option_list} for: {label[:50]}")
+                    else:
+                        print(f"    ⏭️  AI skipped dropdown: {label}")
+                else:
+                    print(f"    ⚠️  No options found in dropdown for: {label[:50]}")
                 continue
 
             # Checkboxes — e.g. "Select the countries you anticipate working in"
