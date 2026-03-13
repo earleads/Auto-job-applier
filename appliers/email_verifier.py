@@ -72,8 +72,11 @@ def _extract_code(body: str) -> str | None:
 _gmail_api_broken = False  # Set to True if refresh token is invalid (avoid repeated retries)
 
 
-def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str | None:
-    """Fetch verification code using Gmail API with OAuth2 refresh token."""
+def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10, since_epoch: float = 0) -> str | None:
+    """Fetch verification code using Gmail API with OAuth2 refresh token.
+
+    If since_epoch > 0, only consider emails received after that Unix timestamp.
+    """
     global _gmail_api_broken
     if _gmail_api_broken:
         print("    ⚠️  Gmail API marked as broken from previous attempt, skipping")
@@ -115,6 +118,12 @@ def _fetch_via_gmail_api(email_address: str, max_age_minutes: int = 10) -> str |
         headers = {"Authorization": f"Bearer {access_token}"}
 
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        # If a since_epoch is provided, use it as the cutoff if it's more recent
+        if since_epoch > 0:
+            since_dt = datetime.fromtimestamp(since_epoch, tz=timezone.utc)
+            if since_dt > cutoff:
+                cutoff = since_dt
+                print(f"    📧 Only accepting emails after submit time ({since_dt.strftime('%H:%M:%S')} UTC)")
 
         # List recent messages directly — avoids Gmail search indexing delay.
         # New emails may not appear in search results for minutes, but they
@@ -287,10 +296,10 @@ def _fetch_via_imap(email_address: str, max_age_minutes: int = 10) -> str | None
 
 # ---------- Public API ----------
 
-def _fetch_greenhouse_code(email_address: str, max_age_minutes: int = 10) -> str | None:
+def _fetch_greenhouse_code(email_address: str, max_age_minutes: int = 10, since_epoch: float = 0) -> str | None:
     """Try Gmail API first, fall back to IMAP."""
     if _use_gmail_api():
-        result = _fetch_via_gmail_api(email_address, max_age_minutes)
+        result = _fetch_via_gmail_api(email_address, max_age_minutes, since_epoch=since_epoch)
         if result:
             return result
 
@@ -300,7 +309,7 @@ def _fetch_greenhouse_code(email_address: str, max_age_minutes: int = 10) -> str
     return None
 
 
-async def fetch_verification_code(email_address: str, max_wait: int = 120, poll_interval: int = 8) -> str | None:
+async def fetch_verification_code(email_address: str, max_wait: int = 120, poll_interval: int = 8, since_epoch: float = 0) -> str | None:
     """
     Poll Gmail for a Greenhouse verification code.
 
@@ -320,7 +329,7 @@ async def fetch_verification_code(email_address: str, max_wait: int = 120, poll_
         poll_count += 1
         print(f"    📧 Poll #{poll_count} (elapsed {elapsed}s/{max_wait}s)...")
         code = await asyncio.get_event_loop().run_in_executor(
-            None, _fetch_greenhouse_code, email_address
+            None, lambda: _fetch_greenhouse_code(email_address, since_epoch=since_epoch)
         )
         if code:
             print(f"    📧 Got verification code: {code}")

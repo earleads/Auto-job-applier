@@ -313,7 +313,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             ]):
                 continue
 
-            # Security Code field — handle specially (request code via email)
+            # Security Code field — SKIP during pre-submit.
+            # Greenhouse sends a fresh code only AFTER form submission,
+            # so any code fetched now would be stale from a previous attempt.
+            # The post-submit handler will fetch and enter the correct code.
             is_security_code_field = (
                 "security code" in label_lower
                 or "verification code" in label_lower
@@ -322,70 +325,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                 or (label_lower.strip() in ("code", "security code*", "verification code*"))
             )
             if is_security_code_field:
-                print(f"    🔐 Security Code field detected (label='{label}') — requesting verification email...")
-                if email_configured():
-                    # First, look for a "Send Code" / "Request Code" button and click it
-                    send_btn = await field.query_selector(
-                        "button, a[href='#'], input[type='button'], input[type='submit']"
-                    )
-                    if not send_btn:
-                        send_btn = await page.query_selector(
-                            "button:has-text('send'), button:has-text('code'), "
-                            "a:has-text('send'), a:has-text('code')"
-                        )
-                    if send_btn:
-                        btn_text = (await send_btn.inner_text()).strip()
-                        print(f"    📧 Clicking send-code button: '{btn_text[:40]}'")
-                        try:
-                            await send_btn.click(timeout=5000)
-                            await page.wait_for_timeout(2000)  # Wait for code to be sent
-                        except Exception as e:
-                            print(f"    ⚠️  Click failed: {e}")
-
-                    code = await fetch_verification_code(APPLICANT["email"], max_wait=120)
-                    if code:
-                        # Wait briefly for input field to become visible after code is requested
-                        await page.wait_for_timeout(1000)
-
-                        # Try multiple strategies to find the input
-                        code_input = None
-                        # Strategy 1: Look inside the field container
-                        code_input = await field.query_selector(
-                            "input[type='text'], input[type='number'], input:not([type='hidden'])"
-                        )
-                        # Strategy 2: Search the whole page
-                        if not code_input:
-                            code_input = await page.query_selector(
-                                "input[name*='security'], input[name*='code'], "
-                                "input[id*='security'], input[id*='code'], "
-                                "input[placeholder*='code']"
-                            )
-
-                        if code_input:
-                            # Always use JS to set value — avoids visibility issues
-                            print(f"    📧 Setting security code via JS: {code}")
-                            await code_input.evaluate(
-                                """(el, val) => {
-                                    el.value = val;
-                                    el.focus();
-                                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                                    el.blur();
-                                }""",
-                                code,
-                            )
-                            # Also try fill() with force as a second attempt
-                            try:
-                                await code_input.fill(code, force=True, timeout=3000)
-                            except Exception:
-                                pass  # JS set above is sufficient
-                            print(f"    📧 Entered security code: {code}")
-                        else:
-                            print(f"    ⚠️  Got code but could not find input in Security Code field")
-                    else:
-                        print(f"    ⚠️  Security code not received via email")
-                else:
-                    print(f"    ⚠️  Security Code required but Gmail not configured")
+                print(f"    🔐 Security Code field detected (label='{label}') — will fill after submit")
                 continue
 
             # Skip fields we can't/shouldn't fill
@@ -546,6 +486,10 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
             print(f"  🚫 CAPTCHA blocked before Greenhouse submit")
             return "captcha_blocked"
 
+        # Record submit time — used to filter out stale verification codes
+        import time as _time
+        submit_epoch = _time.time()
+
         # Submit — scroll into view and use JS click as fallback for overlay issues
         submit_clicked = False
         for sel in ["#submit_app", "button[type='submit']", "input[type='submit']"]:
@@ -586,7 +530,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         ])
         code_entered = False
         if needs_code and email_configured():
-            code = await fetch_verification_code(APPLICANT["email"], max_wait=120)
+            code = await fetch_verification_code(APPLICANT["email"], max_wait=120, since_epoch=submit_epoch)
             if code:
                 # Find the security code input field and enter it
                 code_input = await page.query_selector(
