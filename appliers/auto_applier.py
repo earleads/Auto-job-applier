@@ -68,11 +68,20 @@ Provide the best answer for this field. Be concise and genuine.
 If it's a dropdown/multiple choice, return exactly one of the provided options.
 Otherwise return a short text answer (under 100 words).
 
-IMPORTANT: If you cannot answer because the field asks for something you don't have
-(CAPTCHAs, SSN, passwords, salary expectations with no basis, etc.),
-respond with exactly: SKIP
-IMPORTANT: For "Security Code", "Verification Code", or "Enter the code" fields,
-ALWAYS respond with exactly: SKIP (these are handled separately via email).
+IMPORTANT RULES:
+1. For work authorization questions ("Are you authorized to work in...",
+   "Do you require sponsorship...", "Are you legally authorized..."):
+   - Answer "Yes" for authorized to work questions
+   - Answer "No" for sponsorship/visa requirement questions
+   The candidate is US-based with continuous US work history and does not require sponsorship.
+
+2. For "Security Code", "Verification Code", or "Enter the code" fields:
+   ALWAYS respond with exactly: SKIP (these are handled separately via email).
+
+3. If you truly cannot answer (CAPTCHAs, SSN, passwords, etc.),
+   respond with exactly: SKIP
+
+4. Do NOT skip standard job application questions — always provide a reasonable answer.
 
 Output ONLY the answer (or SKIP), nothing else.
 """
