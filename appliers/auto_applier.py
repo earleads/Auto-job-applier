@@ -311,8 +311,31 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                         code_input = await field.query_selector(
                             "input[type='text'], input[type='number'], input:not([type='hidden'])"
                         )
+                        if not code_input:
+                            # Fallback: search the whole page for code input
+                            code_input = await page.query_selector(
+                                "input[name*='security'], input[name*='code'], "
+                                "input[id*='security'], input[id*='code'], "
+                                "input[placeholder*='code']"
+                            )
                         if code_input:
-                            await code_input.fill(code)
+                            try:
+                                await code_input.scroll_into_view_if_needed(timeout=5000)
+                            except Exception:
+                                pass
+                            try:
+                                await code_input.fill(code, timeout=5000)
+                            except Exception:
+                                # Element not visible — use JS to set value directly
+                                print(f"    ⚠️  fill() failed, using JS to set value...")
+                                await code_input.evaluate(
+                                    """(el, val) => {
+                                        el.value = val;
+                                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                                        el.dispatchEvent(new Event('change', {bubbles: true}));
+                                    }""",
+                                    code,
+                                )
                             print(f"    📧 Entered security code: {code}")
                         else:
                             print(f"    ⚠️  Got code but could not find input in Security Code field")
@@ -457,7 +480,22 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                     "input[type='text']:not(#first_name):not(#last_name):not(#email):not(#phone)"
                 )
                 if code_input:
-                    await code_input.fill(code)
+                    try:
+                        await code_input.scroll_into_view_if_needed(timeout=5000)
+                    except Exception:
+                        pass
+                    try:
+                        await code_input.fill(code, timeout=5000)
+                    except Exception:
+                        print(f"    ⚠️  fill() failed, using JS to set value...")
+                        await code_input.evaluate(
+                            """(el, val) => {
+                                el.value = val;
+                                el.dispatchEvent(new Event('input', {bubbles: true}));
+                                el.dispatchEvent(new Event('change', {bubbles: true}));
+                            }""",
+                            code,
+                        )
                     print(f"    📧 Entered verification code: {code}")
                     await page.wait_for_timeout(1000)
                     # Re-submit with the code
