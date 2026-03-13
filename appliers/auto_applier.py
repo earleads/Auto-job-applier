@@ -289,6 +289,7 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
 
         # Handle custom questions — Greenhouse wraps each in a .field div
         custom_fields = await page.query_selector_all(".field")
+        print(f"    📝 Processing {len(custom_fields)} form fields...")
         for field in custom_fields:
             label_el = await field.query_selector("label")
             label = (await label_el.inner_text()).strip() if label_el else ""
@@ -675,6 +676,99 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                     break
 
         if has_errors:
+            # Try to fix unfilled required fields and resubmit once
+            print(f"    🔄 Attempting to fix validation errors...")
+            fixed_any = False
+
+            # Find all required selects that still have no value
+            required_selects = await page.query_selector_all("select[required], select[aria-required='true']")
+            for sel in required_selects:
+                val = await sel.evaluate("el => el.value")
+                if val and val.strip():
+                    continue
+                # Get the label for this select
+                sel_label = await sel.evaluate(
+                    "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.name || el.id || '')"
+                )
+                # Get available options
+                opts = await sel.query_selector_all("option")
+                opt_list = []
+                for opt_el in opts:
+                    opt_text = (await opt_el.inner_text()).strip()
+                    opt_value = await opt_el.get_attribute("value")
+                    if opt_text and opt_value:
+                        opt_list.append((opt_text, opt_value))
+                if opt_list:
+                    # Filter out empty/placeholder options
+                    real_opts = [(t, v) for t, v in opt_list if v and v.strip()]
+                    if real_opts:
+                        answer = await ai_fill_field(sel_label.strip(), [t for t, v in real_opts])
+                        if answer and answer.upper() != "SKIP":
+                            for opt_text, opt_value in real_opts:
+                                if opt_text.lower() == answer.strip().lower():
+                                    try:
+                                        await sel.select_option(value=opt_value)
+                                        print(f"    ✅ Fixed: selected '{opt_text}' for '{sel_label.strip()[:40]}'")
+                                        fixed_any = True
+                                    except Exception:
+                                        pass
+                                    break
+
+            # Also check for unfilled radio button groups
+            error_fields = await page.query_selector_all(".field.field_with_errors, .field.error, .field:has(.error)")
+            for field in error_fields:
+                radios = await field.query_selector_all("input[type='radio']")
+                if radios:
+                    label_el = await field.query_selector("label")
+                    field_label = (await label_el.inner_text()).strip() if label_el else ""
+                    radio_opts = []
+                    for rb in radios:
+                        rb_label = await rb.evaluate(
+                            "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                        )
+                        if rb_label.strip():
+                            radio_opts.append(rb_label.strip())
+                    if radio_opts:
+                        answer = await ai_fill_field(field_label, radio_opts)
+                        if answer and answer.upper() != "SKIP":
+                            for rb in radios:
+                                rb_label = await rb.evaluate(
+                                    "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                                )
+                                if rb_label.strip().lower() == answer.strip().lower():
+                                    await rb.click()
+                                    print(f"    ✅ Fixed: selected radio '{answer}' for '{field_label[:40]}'")
+                                    fixed_any = True
+                                    break
+
+            if fixed_any:
+                # Re-submit
+                print(f"    🔄 Re-submitting after fixing fields...")
+                for sel in ["#submit_app", "button[type='submit']", "input[type='submit']"]:
+                    btn = await page.query_selector(sel)
+                    if btn:
+                        try:
+                            await btn.click(timeout=5000)
+                        except Exception:
+                            await btn.evaluate("el => el.click()")
+                        break
+                await page.wait_for_timeout(5000)
+
+                # Re-check for success
+                content = (await page.content()).lower()
+                current_url = page.url.lower()
+                content_success = any(kw in content for kw in SUCCESS_KEYWORDS)
+                url_success = any(kw in current_url for kw in ["thank", "confirm", "success"])
+                form_gone = not await page.query_selector("#submit_app")
+                if content_success or url_success:
+                    await capture_screenshot(page, job, "success")
+                    print(f"  ✅ Greenhouse application submitted (after fix)!")
+                    return True
+                elif form_gone:
+                    await capture_screenshot(page, job, "success")
+                    print(f"  ✅ Greenhouse application submitted (form cleared after fix)!")
+                    return True
+
             await capture_screenshot(page, job, "failed")
             return False
         elif content_success or url_success:
