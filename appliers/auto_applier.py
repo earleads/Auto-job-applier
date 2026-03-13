@@ -434,6 +434,42 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
                                 await cb.click()
                 continue
 
+            # Radio buttons — e.g. Yes/No questions
+            radios = await field.query_selector_all("input[type='radio']")
+            if radios:
+                radio_options = []
+                for rb in radios:
+                    rb_label = await rb.evaluate(
+                        "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                    )
+                    if rb_label.strip():
+                        radio_options.append(rb_label.strip())
+                if radio_options:
+                    answer = await ai_fill_field(label, radio_options)
+                    if answer:
+                        # Click the matching radio button
+                        for rb in radios:
+                            rb_label = await rb.evaluate(
+                                "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                            )
+                            if rb_label.strip().lower() == answer.strip().lower():
+                                await rb.click()
+                                print(f"    📻 Selected radio '{answer}' for: {label[:50]}")
+                                break
+                        else:
+                            # Fuzzy match: try partial match if exact didn't work
+                            for rb in radios:
+                                rb_label = await rb.evaluate(
+                                    "el => (el.labels && el.labels[0] ? el.labels[0].innerText : el.value || '')"
+                                )
+                                if answer.strip().lower() in rb_label.strip().lower() or rb_label.strip().lower() in answer.strip().lower():
+                                    await rb.click()
+                                    print(f"    📻 Selected radio '{rb_label.strip()}' (fuzzy) for: {label[:50]}")
+                                    break
+                    else:
+                        print(f"    ⏭️  AI skipped radio field: {label}")
+                continue
+
             # Text inputs (skip hidden inputs, textareas for paste, etc.)
             input_el = await field.query_selector("input[type='text']:not([type='hidden']), input[type='url']")
             if input_el:
