@@ -532,30 +532,89 @@ async def apply_greenhouse(page: Page, job: dict, cv_path: str, cover_letter_pat
         if needs_code and email_configured():
             code = await fetch_verification_code(APPLICANT["email"], max_wait=120, since_epoch=submit_epoch)
             if code:
-                # Find the security code input field and enter it
-                code_input = await page.query_selector(
-                    "input[name*='security'], input[name*='code'], "
-                    "input[id*='security'], input[id*='code'], "
-                    "input[placeholder*='code'], input[placeholder*='security'], "
-                    "input[type='text']:not(#first_name):not(#last_name):not(#email):not(#phone)"
-                )
+                # Find the security code input field — try specific selectors first
+                # After submit, Greenhouse shows the security code field prominently
+                code_input = None
+
+                # Strategy 1: Look for the security code field inside .field containers
+                fields = await page.query_selector_all(".field")
+                for f in fields:
+                    f_label = await f.query_selector("label")
+                    if f_label:
+                        f_text = (await f_label.inner_text()).strip().lower()
+                        if "security code" in f_text or "verification code" in f_text:
+                            code_input = await f.query_selector(
+                                "input[type='text'], input[type='number'], input:not([type='hidden'])"
+                            )
+                            if code_input:
+                                print(f"    📧 Found security code input in field: '{f_text[:50]}'")
+                                break
+
+                # Strategy 2: Broader selector search
+                if not code_input:
+                    for selector in [
+                        "input[name*='security_code']",
+                        "input[id*='security_code']",
+                        "input[name*='security'][name*='code']",
+                        "input[placeholder*='code' i]",
+                    ]:
+                        code_input = await page.query_selector(selector)
+                        if code_input:
+                            input_name = await code_input.get_attribute("name") or ""
+                            input_id = await code_input.get_attribute("id") or ""
+                            print(f"    📧 Found code input via selector: name='{input_name}', id='{input_id}'")
+                            break
+
                 if code_input:
-                    # Use JS first to avoid visibility issues, then try fill with force
-                    print(f"    📧 Setting verification code via JS: {code}")
-                    await code_input.evaluate(
-                        """(el, val) => {
-                            el.value = val;
-                            el.focus();
-                            el.dispatchEvent(new Event('input', {bubbles: true}));
-                            el.dispatchEvent(new Event('change', {bubbles: true}));
-                            el.blur();
-                        }""",
-                        code,
+                    # Log what we found
+                    input_info = await code_input.evaluate(
+                        "el => ({name: el.name, id: el.id, type: el.type, visible: el.offsetParent !== null})"
                     )
+                    print(f"    📧 Code input details: {input_info}")
+
+                    # Try fill() first — it properly triggers React/form state
+                    filled = False
                     try:
-                        await code_input.fill(code, force=True, timeout=3000)
+                        await code_input.scroll_into_view_if_needed(timeout=3000)
                     except Exception:
-                        pass  # JS set above is sufficient
+                        pass
+                    try:
+                        await code_input.fill(code, timeout=5000)
+                        filled = True
+                        print(f"    📧 Filled security code via fill(): {code}")
+                    except Exception as e:
+                        print(f"    ⚠️  fill() failed: {e}")
+
+                    if not filled:
+                        # Try click + type (simulates real user input)
+                        try:
+                            await code_input.click(timeout=3000)
+                            await code_input.type(code, delay=50)
+                            filled = True
+                            print(f"    📧 Typed security code via type(): {code}")
+                        except Exception as e:
+                            print(f"    ⚠️  type() failed: {e}")
+
+                    if not filled:
+                        # Last resort: JS with React-compatible events
+                        print(f"    📧 Setting security code via JS: {code}")
+                        await code_input.evaluate(
+                            """(el, val) => {
+                                // Clear and set value
+                                el.value = '';
+                                el.focus();
+                                // Use native input setter to trigger React
+                                const nativeSetter = Object.getOwnPropertyDescriptor(
+                                    window.HTMLInputElement.prototype, 'value'
+                                ).set;
+                                nativeSetter.call(el, val);
+                                el.dispatchEvent(new Event('input', {bubbles: true}));
+                                el.dispatchEvent(new Event('change', {bubbles: true}));
+                                el.blur();
+                            }""",
+                            code,
+                        )
+
                     print(f"    📧 Entered verification code: {code}")
                     await page.wait_for_timeout(1000)
                     # Re-submit with the code
